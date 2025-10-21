@@ -6,6 +6,8 @@ use std::{
 use anyhow::anyhow;
 use clap::Parser;
 
+use maze_robot::Direction;
+
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct App {
@@ -127,14 +129,6 @@ fn solve_from(maze_chars: &Vec<char>, width: usize, start: usize) -> anyhow::Res
             return Err(anyhow!("No solution found!"));
         }
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum Direction {
-    Up,
-    Right,
-    Down,
-    Left,
 }
 
 fn peek(maze: &Vec<char>, width: usize, direction: Direction, position: usize) -> Option<usize> {
