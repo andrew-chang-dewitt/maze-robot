@@ -1,0 +1,8 @@
+[package]
+name = "maze-robot"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.5.49", features = ["derive"] }
