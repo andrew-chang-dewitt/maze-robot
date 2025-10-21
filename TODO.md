@@ -1,6 +1,6 @@
 # todo
 
-- [ ] refactor maze & related behaviours
+- [/] refactor maze & related behaviours
 - [ ] refactor robot behaviours
   - [ ] abstract to traits
   - [ ] create TextRobot implementation of those traits (leaves ready for
