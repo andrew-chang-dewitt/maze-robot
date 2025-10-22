@@ -1,30 +1,94 @@
 use std::fmt::Display;
 
-pub trait Maze {
-    type Key;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Direction {
+    Up,
+    Right,
+    Down,
+    Left,
+}
 
-    fn lookup_by_direction(&self, from: Self::Key, direction: Direction) -> Option<Self::Key>;
+pub trait Maze {
+    fn look_direction(&self, direction: Direction) -> Result<Cell, MazeError>;
+    fn move_direction(&mut self, direction: Direction) -> Result<(), MazeError>;
+}
+
+trait PrivateMaze {
+    type Key: Copy + Eq;
+    type Value: Into<Cell>;
+
+    fn get_location(&self) -> Self::Key;
+    fn get_loc_in_dir_from(
+        &self,
+        from: Self::Key,
+        direction: Direction,
+    ) -> Result<Self::Key, PrivateMazeError<Self::Key>>;
+    fn get_value(&self, location: Self::Key) -> Result<Self::Value, PrivateMazeError<Self::Key>>;
+    fn set_location(&mut self, location: Self::Key) -> Result<(), PrivateMazeError<Self::Key>>;
+}
+
+impl<P: PrivateMaze> Maze for P {
+    fn look_direction(&self, direction: Direction) -> Result<Cell, MazeError> {
+        self.get_loc_in_dir_from(self.get_location(), direction)
+            .and_then(|l| self.get_value(l))
+            .map(|v| v.into())
+            .map_err(|e| MazeError::from(e))
+    }
+
+    fn move_direction(&mut self, direction: Direction) -> Result<(), MazeError> {
+        let target = self
+            .get_loc_in_dir_from(self.get_location(), direction)
+            .map_err(|e| MazeError::from(e))?;
+
+        self.set_location(target).map_err(|e| MazeError::from(e))
+    }
 }
 
 #[derive(Debug)]
+pub enum Cell {
+    Open,
+    Finish,
+    Wall,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub enum MazeError {
     DirectionOutOfBounds(Direction),
+    NavigationError(Direction),
+    UnknownError(String),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum PrivateMazeError<L> {
+    DirectionOutOfBounds(Direction),
+    LocationInvalid(L),
+}
+
+impl<E> From<PrivateMazeError<E>> for MazeError {
+    fn from(value: PrivateMazeError<E>) -> Self {
+        match value {
+            PrivateMazeError::LocationInvalid(_) => Self::UnknownError(String::from(
+                "Error occurred while working with current location.",
+            )),
+            PrivateMazeError::DirectionOutOfBounds(d) => Self::DirectionOutOfBounds(d),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct TextMaze {
-    maze: Vec<char>,
-    pub start: usize,
+    chars: Vec<char>,
+    loc: usize,
     width: usize,
     height: usize,
 }
 
 impl TextMaze {
-    fn new(maze: String) -> Self {
+    pub fn new(maze: String) -> Self {
         let res = maze.chars().enumerate().fold(
             TextMaze {
-                maze: vec![],
-                start: 0,
+                chars: vec![],
+                loc: 0,
                 width: 0,
                 height: maze.lines().count(),
             },
@@ -33,7 +97,7 @@ impl TextMaze {
                 match chr {
                     // like start location
                     'S' => {
-                        acc.start = idx;
+                        acc.loc = idx;
                     }
                     // and width
                     '\n' if acc.width == 0 => {
@@ -42,113 +106,114 @@ impl TextMaze {
                     _ => (),
                 };
                 // then push character
-                acc.maze.push(chr);
+                acc.chars.push(chr);
                 // and move to next
                 acc
             },
         );
 
-        println!("[TextMaze::new] created new maze: {res}");
+        // println!("[TextMaze::new] created new maze: {res}");
 
         res
     }
 }
 
-impl Maze for TextMaze {
-    type Key = usize;
+impl Into<Cell> for char {
+    fn into(self) -> Cell {
+        match self {
+            '+' => Cell::Wall,
+            'F' => Cell::Finish,
+            _ => Cell::Open,
+        }
+    }
+}
 
-    fn lookup_by_direction(&self, from: Self::Key, direction: Direction) -> Option<Self::Key> {
-        println!("[TextMaze::lookup_by_direction] called w/ from: {from:?}, dir: {direction:?}");
-        let result = match direction {
+impl PrivateMaze for TextMaze {
+    type Key = usize;
+    type Value = char;
+
+    fn get_loc_in_dir_from(
+        &self,
+        from: Self::Key,
+        direction: Direction,
+    ) -> Result<Self::Key, PrivateMazeError<Self::Key>> {
+        // println!("[TextMaze::lookup_by_direction] called w/ from: {from:?}, dir: {direction:?}");
+        match direction {
             Direction::Up => {
                 // no up if in top row
                 if from <= self.width {
-                    None
+                    Err(PrivateMazeError::DirectionOutOfBounds(direction))
                 } else {
-                    Some(from - self.width - 1)
+                    Ok(from - self.width - 1)
                 }
             }
             Direction::Right => {
                 let res = from + 1;
 
                 // no right if past end of maze or in right col
-                if res >= self.maze.len() || Some(&'\n') == self.maze.get(res) {
-                    None
+                if res >= self.chars.len() || Some(&'\n') == self.chars.get(res) {
+                    Err(PrivateMazeError::DirectionOutOfBounds(direction))
                 } else {
-                    Some(res)
+                    Ok(res)
                 }
             }
             Direction::Down => {
                 let res = from + self.width + 1;
 
                 // no down if in bottom row
-                if res >= self.maze.len() {
-                    None
+                if res >= self.chars.len() {
+                    Err(PrivateMazeError::DirectionOutOfBounds(direction))
                 } else {
-                    Some(res)
+                    Ok(res)
                 }
             }
             Direction::Left => {
                 // no left if at beginning, otherwise decrement to go left
-                let res = if from == 0 { None } else { Some(from - 1) };
+                if from == 0 {
+                    Err(PrivateMazeError::DirectionOutOfBounds(direction))
+                } else {
+                    let res = from - 1;
 
-                match res {
-                    // ensure left doesn't wrap up a column
-                    Some(v) if self.maze.get(v) == Some(&'\n') => None,
-                    // otherwise left is valid
-                    _ => res,
+                    // no left if in left col
+                    if Some(&'\n') == self.chars.get(res) {
+                        Err(PrivateMazeError::DirectionOutOfBounds(direction))
+                    } else {
+                        Ok(res)
+                    }
                 }
             }
-        };
-
-        if let Some(neighbor) = result {
-            println!(
-                "[TextMaze::lookup_by_direction] {direction:#?} from {:?} (@{from}) is {neighbor}",
-                self.maze.get(from).unwrap()
-            );
-
-            let cell_value = self
-                .maze
-                .get(result.expect("will have neighbor position at this point"))
-                .expect("maze position must exist at this point");
-
-            println!("[TextMaze::lookup_by_direction] with value of {cell_value:?}");
-
-            if cell_value == &'+' {
-                None
-            } else {
-                Some(neighbor)
-            }
-        } else {
-            // println!(
-            //     "[TextMaze::lookup_by_direction] no cell {direction:#?} from {:?} (@{from})",
-            //     self.maze.get(from).unwrap()
-            // );
-            None
         }
+    }
+
+    fn get_value(&self, location: Self::Key) -> Result<Self::Value, PrivateMazeError<Self::Key>> {
+        todo!()
+    }
+
+    fn get_location(&self) -> Self::Key {
+        todo!()
+    }
+
+    fn set_location(&mut self, location: Self::Key) -> Result<(), PrivateMazeError<Self::Key>> {
+        todo!()
     }
 }
 
 impl Display for TextMaze {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let as_str: String = self.maze.iter().collect();
-        let as_lines: Vec<String> = as_str.lines().map(|l| format!("  {l}")).collect();
+        // mark current location on map
+        let marked: String = self
+            .chars
+            .iter()
+            .enumerate()
+            .map(|(i, c)| if i == self.loc { &'x' } else { c })
+            .collect();
+        // then pad each line w/ two spaces for prettier printing
+        let as_lines: Vec<String> = marked.lines().map(|l| format!("  {l}")).collect();
+        // and join those lines into one string
         let maze: String = as_lines.join("\n");
 
-        write!(
-            f,
-            "{} x {} maze starting @ {}:\n{}",
-            self.width, self.height, self.start, maze,
-        )
+        write!(f, "{} x {} maze:\n{}", self.width, self.height, maze,)
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum Direction {
-    Up,
-    Right,
-    Down,
-    Left,
 }
 
 #[cfg(test)]
@@ -158,92 +223,66 @@ mod test_text_mase {
     use super::*;
 
     #[rstest]
-    #[case::from_1_start(5, Some(0))]
-    #[case::from_1_end(8, Some(3))]
-    #[case::from_0_start(0, None)]
-    #[case::from_0_end(4, None)]
-    #[case::to_wall(7, None)]
-    fn look_up(#[case] from: usize, #[case] exp: Option<usize>) {
+    #[case::from_1_start(5, Ok(0))]
+    #[case::from_1_end(8, Ok(3))]
+    #[case::from_0_start(0, Err(PrivateMazeError::DirectionOutOfBounds(Direction::Up)))]
+    #[case::from_0_end(4, Err(PrivateMazeError::DirectionOutOfBounds(Direction::Up)))]
+    #[case::to_wall(7, Ok(2))]
+    fn look_up(#[case] from: usize, #[case] exp: Result<usize, PrivateMazeError<usize>>) {
         let test_maze = r#"FB+D
 SACE"#;
         let maze = TextMaze::new(String::from(test_maze));
 
-        let act = maze.lookup_by_direction(from, Direction::Up);
-        let msg = format!(
-            "expected UP from {:?} to be {:?}, got {:?}",
-            maze.maze.get(from),
-            exp.map(|v| maze.maze.get(v)).flatten(),
-            act.map(|v| maze.maze.get(v)).flatten(),
-        );
+        let act = maze.get_loc_in_dir_from(from, Direction::Up);
 
-        assert_eq!(act, exp, "{msg}");
+        assert_eq!(act, exp);
     }
 
     #[rstest]
-    #[case::from_0_start(0, Some(5))]
-    #[case::from_0_end(3, Some(8))]
-    #[case::from_1_start(5, None)]
-    #[case::from_1_end(8, None)]
-    #[case::to_wall(2, None)]
-    fn look_down(#[case] from: usize, #[case] exp: Option<usize>) {
+    #[case::from_0_start(0, Ok(5))]
+    #[case::from_0_end(3, Ok(8))]
+    #[case::from_1_start(5, Err(PrivateMazeError::DirectionOutOfBounds(Direction::Down)))]
+    #[case::from_1_end(8, Err(PrivateMazeError::DirectionOutOfBounds(Direction::Down)))]
+    #[case::to_wall(2, Ok(7))]
+    fn look_down(#[case] from: usize, #[case] exp: Result<usize, PrivateMazeError<usize>>) {
         let test_maze = r#"FBCD
 SA+E"#;
         let maze = TextMaze::new(String::from(test_maze));
 
-        let act = maze.lookup_by_direction(from, Direction::Down);
-        let msg = format!(
-            "expected DOWN from {:?} to be {:?}, got {:?}",
-            maze.maze.get(from),
-            exp.map(|v| maze.maze.get(v)).flatten(),
-            act.map(|v| maze.maze.get(v)).flatten(),
-        );
+        let act = maze.get_loc_in_dir_from(from, Direction::Down);
 
-        assert_eq!(act, exp, "{msg}");
+        assert_eq!(act, exp);
     }
 
     #[rstest]
-    #[case::from_0_start(0, Some(1))]
-    #[case::from_0_end(1, None)]
-    #[case::from_end_end(10, None)]
-    #[case::to_wall(6, None)]
-    fn look_right(#[case] from: usize, #[case] exp: Option<usize>) {
+    #[case::from_0_start(0, Ok(1))]
+    #[case::from_0_end(1, Err(PrivateMazeError::DirectionOutOfBounds(Direction::Right)))]
+    #[case::from_end_end(10, Err(PrivateMazeError::DirectionOutOfBounds(Direction::Right)))]
+    #[case::to_wall(6, Ok(7))]
+    fn look_right(#[case] from: usize, #[case] exp: Result<usize, PrivateMazeError<usize>>) {
         let test_maze = r#"SA
 CB
 D+
 EF"#;
         let maze = TextMaze::new(String::from(test_maze));
+        let act = maze.get_loc_in_dir_from(from, Direction::Right);
 
-        let act = maze.lookup_by_direction(from, Direction::Right);
-        let msg = format!(
-            "expected LEFT from {:?} to be {:?}, got {:?}",
-            maze.maze.get(from),
-            exp.map(|v| maze.maze.get(v)).flatten(),
-            act.map(|v| maze.maze.get(v)).flatten(),
-        );
-
-        assert_eq!(act, exp, "{msg}");
+        assert_eq!(act, exp);
     }
 
     #[rstest]
-    #[case::from_0_end(1, Some(0))]
-    #[case::from_0_start(0, None)]
-    #[case::from_1_start(3, None)]
-    #[case::to_wall(7, None)]
-    fn look_left(#[case] from: usize, #[case] exp: Option<usize>) {
+    #[case::from_0_end(1, Ok(0))]
+    #[case::from_0_start(0, Err(PrivateMazeError::DirectionOutOfBounds(Direction::Left)))]
+    #[case::from_1_start(3, Err(PrivateMazeError::DirectionOutOfBounds(Direction::Left)))]
+    #[case::to_wall(7, Ok(6))]
+    fn look_left(#[case] from: usize, #[case] exp: Result<usize, PrivateMazeError<usize>>) {
         let test_maze = r#"SA
 CB
 +D
 EF"#;
         let maze = TextMaze::new(String::from(test_maze));
+        let act = maze.get_loc_in_dir_from(from, Direction::Left);
 
-        let act = maze.lookup_by_direction(from, Direction::Left);
-        let msg = format!(
-            "expected RIGHT from {:?} to be {:?}, got {:?}",
-            maze.maze.get(from),
-            exp.map(|v| maze.maze.get(v)).flatten(),
-            act.map(|v| maze.maze.get(v)).flatten(),
-        );
-
-        assert_eq!(act, exp, "{msg}");
+        assert_eq!(act, exp);
     }
 }
