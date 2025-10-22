@@ -2,7 +2,7 @@ use std::{error::Error, fmt::Display};
 
 use crate::{Cell, Direction};
 
-pub trait Maze {
+pub trait Maze: Display {
     fn look_dir(&self, direction: Direction) -> Cell;
     fn update(&mut self, direction: Direction) -> Result<(), MazeError>;
 }
@@ -91,7 +91,7 @@ impl TryFrom<&str> for TextMaze {
     type Error = MazeError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        println!("creating maze from {value}");
+        // println!("creating maze from {value}");
         let (chars, maybe_loc, maybe_width) =
             value
                 .chars()
@@ -181,7 +181,7 @@ impl Display for MazeError {
             }
         };
 
-        write!(f, "MazeError:{out}")
+        write!(f, "MazeError::{out}")
     }
 }
 

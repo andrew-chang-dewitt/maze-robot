@@ -4,7 +4,7 @@ mod robot;
 use std::fmt::Display;
 
 pub use crate::maze::Maze;
-pub use crate::robot::Robot;
+pub use crate::robot::{Robot, RobotError};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Direction {
@@ -12,6 +12,17 @@ pub enum Direction {
     Right,
     Down,
     Left,
+}
+
+impl Direction {
+    pub fn reverse(&self) -> Self {
+        match self {
+            Self::Up => Self::Down,
+            Self::Down => Self::Up,
+            Self::Right => Self::Left,
+            Self::Left => Self::Right,
+        }
+    }
 }
 
 impl Display for Direction {

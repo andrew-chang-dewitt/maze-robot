@@ -10,16 +10,18 @@ pub struct Robot<M: Maze> {
 }
 
 impl<M: Maze> Robot<M> {
-    fn new(state: M) -> Self {
+    pub fn new(state: M) -> Self {
         Robot { state }
     }
 
-    fn peek(&self, direction: Direction) -> Cell {
+    pub fn peek(&self, direction: Direction) -> Cell {
         self.state.look_dir(direction)
     }
 
-    fn go(&mut self, direction: Direction) -> Result<(), RobotError> {
-        self.state.update(direction).map_err(|e| e.into())
+    pub fn go(&mut self, direction: Direction) -> Result<(), RobotError> {
+        self.state
+            .update(direction)
+            .map_err(|e| RobotError::from((e, &self.state)))
     }
 }
 
@@ -27,7 +29,7 @@ impl TryFrom<&str> for Robot<TextMaze> {
     type Error = RobotError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let maze = TextMaze::try_from(value).map_err(|e| e.into())?;
+        let maze = TextMaze::try_from(value).map_err(|e| RobotError::from((e, value)))?;
 
         Ok(Robot::new(maze))
     }
@@ -35,30 +37,32 @@ impl TryFrom<&str> for Robot<TextMaze> {
 
 #[derive(Debug)]
 pub enum RobotError {
-    CreationError(String),
-    NavigationError(Direction),
+    CreationError(String, String),
+    NavigationError(Direction, String),
 }
 
 impl Display for RobotError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let out = match self {
-            Self::CreationError(msg) => format!("CreationError: {msg}"),
-            Self::NavigationError(dir) => {
-                format!("UpdateError: unable to go {dir} from current location")
+            Self::CreationError(msg, state) => format!("CreationError: {msg}, with\n{state}"),
+            Self::NavigationError(dir, state) => {
+                format!(
+                    "NavigationError: unable to go {dir} from current location, see state:\n{state}"
+                )
             }
         };
 
-        write!(f, "MazeError:{out}")
+        write!(f, "RobotError::{out}")
     }
 }
 
 impl Error for RobotError {}
 
-impl Into<RobotError> for MazeError {
-    fn into(self) -> RobotError {
-        match self {
-            MazeError::CreationError(msg) => RobotError::CreationError(msg),
-            MazeError::UpdateError(dir) => RobotError::NavigationError(dir),
+impl<S: Display> From<(MazeError, S)> for RobotError {
+    fn from((maze_err, state): (MazeError, S)) -> Self {
+        match maze_err {
+            MazeError::CreationError(msg) => RobotError::CreationError(msg, state.to_string()),
+            MazeError::UpdateError(dir) => RobotError::NavigationError(dir, state.to_string()),
         }
     }
 }
