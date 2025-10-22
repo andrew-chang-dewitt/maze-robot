@@ -60,10 +60,10 @@ fn find_solution_bfs<M: Maze>(
         println!("processing cell {cell} from {location} with\ngraph {graph:#?},\npath {path:#?}");
         // navigate robot to next cell
         location = navigate_bfs(&mut robot, location, cell, &graph, &path)?;
-        // println!("moved robot to cell {location}");
+        println!("moved robot to cell {location}");
         // mark as visitied
         visited.insert(cell);
-        // println!("marked {location} as visited {visited:?}");
+        println!("marked {location} as visited {visited:?}");
         // mark finish as not yet found
         let mut finish: Option<usize> = None;
 
@@ -72,9 +72,20 @@ fn find_solution_bfs<M: Maze>(
             0 => None,
             _ => path.get(&location),
         }
-        .and_then(|pdx| graph.get(&pdx).map(|n| (pdx, n)))
-        .and_then(|(pdx, n)| find_direction_to_neighbor(n, location).map(|dir| (pdx, dir)))
+        .and_then(|pdx| {
+            graph.get(&pdx).map(|n| {
+                println!("found neighbors {n:?} for parent {pdx} of {location}");
+                (pdx, n)
+            })
+        })
+        .and_then(|(pdx, n)| {
+            find_direction_to_neighbor(n, location).map(|dir| {
+                println!("location is {dir} from {pdx}");
+                (pdx, dir)
+            })
+        })
         .map(|(pdx, dir_p_to_l)| (pdx, dir_p_to_l.reverse()));
+        println!("{pdx} is {dir} ");
 
         let init_neighbors = match parent_direction {
             Some((&pdx, Direction::Up)) => [Some(pdx), None, None, None],
