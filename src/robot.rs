@@ -17,6 +17,10 @@ impl<M: Maze> Robot<M> {
     fn peek(&self, direction: Direction) -> Cell {
         self.state.look_dir(direction)
     }
+
+    fn go(&mut self, direction: Direction) -> Result<(), RobotError> {
+        self.state.update(direction).map_err(|e| e.into())
+    }
 }
 
 impl TryFrom<&str> for Robot<TextMaze> {
@@ -32,12 +36,16 @@ impl TryFrom<&str> for Robot<TextMaze> {
 #[derive(Debug)]
 pub enum RobotError {
     CreationError(String),
+    NavigationError(Direction),
 }
 
 impl Display for RobotError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let out = match self {
             Self::CreationError(msg) => format!("CreationError: {msg}"),
+            Self::NavigationError(dir) => {
+                format!("UpdateError: unable to go {dir} from current location")
+            }
         };
 
         write!(f, "MazeError:{out}")
@@ -50,6 +58,7 @@ impl Into<RobotError> for MazeError {
     fn into(self) -> RobotError {
         match self {
             MazeError::CreationError(msg) => RobotError::CreationError(msg),
+            MazeError::UpdateError(dir) => RobotError::NavigationError(dir),
         }
     }
 }
@@ -60,20 +69,20 @@ mod tests {
 
     use super::*;
 
-    const WALL_MAZE: &str = r#"+++
+    pub const WALL_MAZE: &str = r#"+++
 +S+
 +++"#;
-    const OPEN_MAZE: &str = r#"   
+    pub const OPEN_MAZE: &str = r#"   
  S 
    "#;
-    const FNSH_MAZE: &str = r#"SF"#;
-    const TOPL_MAZE: &str = r#"S 
+    pub const FNSH_MAZE: &str = r#"SF"#;
+    pub const TOPL_MAZE: &str = r#"S 
   "#;
-    const TOPR_MAZE: &str = r#" S
+    pub const TOPR_MAZE: &str = r#" S
   "#;
-    const BOTL_MAZE: &str = r#"  
+    pub const BOTL_MAZE: &str = r#"  
 S "#;
-    const BOTR_MAZE: &str = r#"  
+    pub const BOTR_MAZE: &str = r#"  
  S"#;
 
     fn make_robot(maze: &str) -> Robot<TextMaze> {
@@ -160,5 +169,15 @@ S "#;
         let act = rob.peek(Direction::Right);
 
         assert_eq!(act, Cell::Finish)
+    }
+
+    #[rstest]
+    fn test_go_open(
+        #[values(Direction::Up, Direction::Right, Direction::Down, Direction::Left)]
+        direction: Direction,
+    ) -> Result<(), RobotError> {
+        let mut rob = make_robot(OPEN_MAZE);
+
+        rob.go(direction)
     }
 }
