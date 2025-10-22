@@ -12,7 +12,7 @@ pub enum Direction {
     Left,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Cell {
     Finish,
     Open,
