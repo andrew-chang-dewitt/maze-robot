@@ -80,56 +80,71 @@ fn find_solution_bfs<M: Maze>(
         })
         .and_then(|(pdx, n)| {
             find_direction_to_neighbor(n, location).map(|dir| {
-                println!("location is {dir} from {pdx}");
+                println!("{location} is {dir:?} from {pdx}");
                 (pdx, dir)
             })
         })
-        .map(|(pdx, dir_p_to_l)| (pdx, dir_p_to_l.reverse()));
-        println!("{pdx} is {dir} ");
+        .map(|(pdx, dir_p_to_l)| {
+            println!("{pdx} is {:?} from {location}", dir_p_to_l.reverse());
+            (pdx, dir_p_to_l.reverse())
+        });
 
         let init_neighbors = match parent_direction {
             Some((&pdx, Direction::Up)) => [Some(pdx), None, None, None],
             Some((&pdx, Direction::Right)) => [None, Some(pdx), None, None],
-            Some((&pdx, Direction::Left)) => [None, None, Some(pdx), None],
-            Some((&pdx, Direction::Down)) => [None, None, None, Some(pdx)],
+            Some((&pdx, Direction::Down)) => [None, None, Some(pdx), None],
+            Some((&pdx, Direction::Left)) => [None, None, None, Some(pdx)],
             None => [None, None, None, None],
         };
+
+        println!("parsing neighbors, starting w/ list as {init_neighbors:?}");
 
         // add cell & neighbors list to graph
         let neighbors: [Option<usize>; 4] = DIR_ARR.iter().enumerate().fold(
             init_neighbors,
-            |mut acc, (idx, direction)| match robot.peek(*direction) {
-                Cell::Open => {
-                    // assign neighbor cell an index
-                    let neighbor = nxt_idx;
-                    // increment cell index any time the next is used
-                    nxt_idx += 1;
-                    // update neighbors list to include cell
-                    acc[idx] = Some(neighbor);
-                    // if not already visited
-                    if !visited.contains(&neighbor) {
-                        // add parent-child relationship for neighbor & location to path
-                        path.insert(neighbor, location);
-                        // push neighbor to queue
-                        to_visit.push_back(neighbor);
+            |mut acc, (idx, direction)| {
+                if let None = acc[idx] {
+                    match robot.peek(*direction) {
+                        Cell::Open => {
+                            // assign neighbor cell an index
+                            let neighbor = nxt_idx;
+                            // increment cell index any time the next is used
+                            nxt_idx += 1;
+                            // update neighbors list to include cell
+                            acc[idx] = Some(neighbor);
+                            // if not already visited
+                            if !visited.contains(&neighbor) {
+                                // add parent-child relationship for neighbor & location to path
+                                path.insert(neighbor, location);
+                                println!("assigned {location} as parent of {neighbor} in {path:?}");
+                                // push neighbor to queue
+                                to_visit.push_back(neighbor);
+                                println!(
+                                    "found neighbor {neighbor} to the {direction:?} of {location}"
+                                );
+                            }
+                            // finally, return updated neighbors list
+                            acc
+                        }
+                        Cell::Finish => {
+                            // assign neighbor cell an index
+                            let neighbor = nxt_idx;
+                            // increment cell index any time the next is used
+                            nxt_idx += 1;
+                            println!("found solution @ {neighbor}!");
+                            // mark finish as found!
+                            finish = Some(neighbor);
+                            // update neighbors list to include finish
+                            acc[idx] = Some(neighbor);
+                            // add parent-child relationship for neighbor & location to path
+                            path.insert(neighbor, location);
+                            acc
+                        }
+                        Cell::Wall => acc,
                     }
-                    // finally, return updated neighbors list
+                } else {
                     acc
                 }
-                Cell::Finish => {
-                    // assign neighbor cell an index
-                    let neighbor = nxt_idx;
-                    // increment cell index any time the next is used
-                    nxt_idx += 1;
-                    // mark finish as found!
-                    finish = Some(neighbor);
-                    // update neighbors list to include finish
-                    acc[idx] = Some(neighbor);
-                    // add parent-child relationship for neighbor & location to path
-                    path.insert(neighbor, location);
-                    acc
-                }
-                Cell::Wall => acc,
             },
         );
         graph.insert(cell, neighbors);
