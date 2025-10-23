@@ -83,6 +83,8 @@ impl Maze for TextMaze {
             })
             .ok_or(MazeError::UpdateError(direction))?;
 
+        println!("newstate:\n{self}");
+
         Ok(())
     }
 }
