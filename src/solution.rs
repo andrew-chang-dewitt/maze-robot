@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::anyhow;
-use maze_robot::{CardinalDirection, Cell, Maze, Robot, RobotError};
+use maze_robot::{CARD_DIR_ARR, CardinalDirection, Cell, Maze, Robot, RobotError};
 
 type CellKey = (isize, isize);
 type Parents = HashMap<CellKey, (CardinalDirection, CellKey)>;
@@ -35,7 +35,6 @@ pub fn find_solution<M: Maze>(_robot: Robot<M>) -> anyhow::Result<Solution> {
 trait GraphN<K>
 where
     K: Eq + Copy + Debug + Hash + Sized,
-    Self: Sized,
 {
     fn dfs(
         &self,
@@ -58,7 +57,7 @@ where
         visited.insert(*key);
 
         // call get_neighbors here to get list
-        let neighbors = self.get_neighbors(key)?;
+        let neighbors = self.get_neighbors(key);
         for neighbor in neighbors {
             if !visited.contains(&neighbor) {
                 self.dfs_helper(&neighbor, on_visit, visited)?;
@@ -68,12 +67,12 @@ where
         Ok(())
     }
 
-    fn get_neighbors(&self, key: &K) -> anyhow::Result<impl Iterator<Item = K>>;
+    fn get_neighbors(&self, key: &K) -> impl Iterator<Item = K>;
 }
 
 struct MazeSolver<F, G>
 where
-    F: Fn() -> Result<[Cell; 4], RobotError>,
+    F: Fn(CardinalDirection) -> Cell,
     G: FnMut(CardinalDirection) -> Result<(), RobotError>,
 {
     peek_fn: F,
@@ -82,14 +81,18 @@ where
 
 impl<F, G> GraphN<CellKey> for MazeSolver<F, G>
 where
-    F: Fn() -> Result<[Cell; 4], RobotError>,
+    F: Fn(CardinalDirection) -> Cell,
     G: FnMut(CardinalDirection) -> Result<(), RobotError>,
 {
-    fn get_neighbors(&self, key: &CellKey) -> anyhow::Result<impl Iterator<Item = CellKey>> {
-        let neighbors = (self.peek_fn)();
-
-        // matches cell type to Some/None & assigns cell key for each
-        Ok(neighbors.iter().filter_map(|cell| todo!()))
+    fn get_neighbors(&self, key: &CellKey) -> impl Iterator<Item = CellKey> {
+        CARD_DIR_ARR
+            .iter()
+            .filter_map(|&dir| match (self.peek_fn)(dir) {
+                Cell::Finish | Cell::Open => Some(todo!(
+                    " need to calculate new cell key from direction and current key"
+                )),
+                Cell::Wall => None,
+            })
     }
 }
 
@@ -107,7 +110,7 @@ where
     K: Eq + Copy + Debug + Hash + Sized,
 {
     // TODO: use this to peek at TextMaze & get neighbors from result!
-    fn get_neighbors(&self, key: &K) -> anyhow::Result<impl Iterator<Item = K>> {
+    fn get_neighbors(&self, key: &K) -> impl Iterator<Item = K> {
         let neighbors = self
             .adj_list
             .get(key)
