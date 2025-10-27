@@ -1,27 +1,12 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    hash::Hash,
-};
+use std::{collections::HashSet, fmt::Debug, hash::Hash};
 
-use anyhow::anyhow;
 use maze_robot::{CARD_DIR_ARR, CardinalDirection, Cell, Maze, Robot, RobotError};
 
-type CellKey = (isize, isize);
-type Parents = HashMap<CellKey, (CardinalDirection, CellKey)>;
-type CellGraph = HashMap<CellKey, [Option<CellKey>; 4]>;
-
-pub struct Solution {
-    _finish: CellKey,
-    _graph: CellGraph,
-    _parents: Parents,
-}
+pub type Solution = Vec<CellKey>;
 
 pub fn render_solution(_solution: Solution) -> String {
     todo!()
 }
-
-const _START: (isize, isize) = (0, 0);
 
 pub fn find_solution<M: Maze>(_robot: Robot<M>) -> anyhow::Result<Solution> {
     // track parent direction & id by child
@@ -87,61 +72,69 @@ where
     fn get_neighbors(&self, key: &CellKey) -> impl Iterator<Item = CellKey> {
         CARD_DIR_ARR
             .iter()
-            .filter_map(|&dir| match (self.peek_fn)(dir) {
-                Cell::Finish | Cell::Open => Some(todo!(
-                    " need to calculate new cell key from direction and current key"
-                )),
+            .filter_map(|&direction| match (self.peek_fn)(direction) {
+                Cell::Finish | Cell::Open => Some(key.compute(direction)),
                 Cell::Wall => None,
             })
     }
 }
 
-struct GraphDeg4<K>
-where
-    K: Eq + Debug + Hash + Sized,
-{
-    adj_list: HashMap<K, [Option<K>; 4]>,
-}
+/// unique identifiers for maze cells (x,y) coords w/ start @ (0,0)
+#[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
+pub struct CellKey(isize, isize);
 
-impl<K> GraphDeg4<K> where K: Eq + Copy + Debug + Hash + Sized {}
+impl CellKey {
+    fn compute(&self, direction: CardinalDirection) -> Self {
+        let &CellKey(x, y) = self;
 
-impl<K> GraphN<K> for GraphDeg4<K>
-where
-    K: Eq + Copy + Debug + Hash + Sized,
-{
-    // TODO: use this to peek at TextMaze & get neighbors from result!
-    fn get_neighbors(&self, key: &K) -> impl Iterator<Item = K> {
-        let neighbors = self
-            .adj_list
-            .get(key)
-            .ok_or(anyhow!("Key {key:?} must exist"))?;
-
-        let res = neighbors
-            .iter()
-            .filter_map(|maybe_neighbor| match maybe_neighbor {
-                &Some(n) => Some(n),
-                None => None,
-            });
-
-        Ok(res)
-    }
-}
-
-impl<T, K> From<T> for GraphDeg4<K>
-where
-    K: Eq + Copy + Debug + Hash + Sized,
-    T: Into<HashMap<K, [Option<K>; 4]>>,
-{
-    fn from(value: T) -> Self {
-        Self {
-            adj_list: value.into(),
+        match direction {
+            CardinalDirection::North => CellKey(x + 1, y),
+            CardinalDirection::East => CellKey(x, y + 1),
+            CardinalDirection::South => CellKey(x - 1, y),
+            CardinalDirection::West => CellKey(x, y - 1),
         }
     }
 }
 
+const _START: CellKey = CellKey(0, 0);
+
 #[cfg(test)]
 mod graph_tests {
+    use std::collections::HashMap;
+
     use super::*;
+
+    struct GraphDeg4<K>
+    where
+        K: Eq + Debug + Hash + Sized,
+    {
+        adj_list: HashMap<K, [Option<K>; 4]>,
+    }
+
+    impl<K> GraphN<K> for GraphDeg4<K>
+    where
+        K: Eq + Copy + Debug + Hash + Sized,
+    {
+        fn get_neighbors(&self, key: &K) -> impl Iterator<Item = K> {
+            self.adj_list
+                .get(key)
+                .expect("Key {key:?} must exist")
+                .iter()
+                .filter_map(|maybe_neighbor| maybe_neighbor.to_owned())
+        }
+    }
+
+    impl<T, K> From<T> for GraphDeg4<K>
+    where
+        K: Eq + Copy + Debug + Hash + Sized,
+        T: Into<HashMap<K, [Option<K>; 4]>>,
+    {
+        fn from(value: T) -> Self {
+            Self {
+                adj_list: value.into(),
+            }
+        }
+    }
 
     #[test]
     fn dfs_can_visit_all_nodes() {
