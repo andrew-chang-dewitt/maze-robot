@@ -9,9 +9,10 @@ pub enum Cell {
     Wall,
 }
 
-pub trait Maze: Display {
-    fn look_dir(&self, direction: CardinalDirection) -> Cell;
-    fn update(&mut self, direction: CardinalDirection) -> Result<(), MazeError>;
+pub trait Maze<Loc> {
+    fn look_dir(&self, from: &Loc, direction: CardinalDirection) -> (Cell, Option<Loc>);
+    fn update(&self, from: &Loc, direction: CardinalDirection) -> Result<Loc, MazeError>;
+    fn render(&self, loc: &Loc) -> String;
 }
 
 /// maze encoded as str where:
@@ -21,24 +22,24 @@ pub trait Maze: Display {
 /// - all others are considered open
 pub struct TextMaze {
     chars: Vec<char>,
-    loc: usize,
     width: usize,
+    pub start: usize,
 }
 
 impl TextMaze {
-    fn get_posn_in_dir(&self, direction: CardinalDirection) -> Option<usize> {
+    fn get_posn_in_dir(&self, from: &usize, direction: CardinalDirection) -> Option<usize> {
         match direction {
             CardinalDirection::North => {
                 // no up if in top row
-                if self.loc <= self.width {
+                if from <= &self.width {
                     None
                 } else {
-                    Some(self.loc - self.width - 1)
+                    Some(from - &self.width - 1)
                 }
             }
             CardinalDirection::South => {
                 // go down one row by adding width & accounting for newline char
-                let pos = self.loc + self.width + 1;
+                let pos = from + &self.width + 1;
                 // no down if past end of chars vec
                 if pos >= self.chars.len() {
                     None
@@ -48,7 +49,7 @@ impl TextMaze {
             }
             CardinalDirection::East => {
                 // go right one col by incrementing pos
-                let pos = self.loc + 1;
+                let pos = from + 1;
                 // no right if past end of chars vec
                 if pos >= self.chars.len() {
                     None
@@ -58,30 +59,29 @@ impl TextMaze {
             }
             CardinalDirection::West => {
                 // no left if loc already at start
-                if self.loc == 0 {
+                if from == &0 {
                     None
                 } else {
                     // go left one col by decrementing pos
-                    Some(self.loc - 1)
+                    Some(from - 1)
                 }
             }
         }
     }
 }
 
-impl Maze for TextMaze {
-    fn look_dir(&self, direction: CardinalDirection) -> Cell {
+impl Maze<usize> for TextMaze {
+    fn look_dir(&self, from: &usize, direction: CardinalDirection) -> (Cell, Option<usize>) {
         // println!("looking {direction:?}: {self}");
-        self.get_posn_in_dir(direction)
-            .and_then(|pos| self.chars.get(pos))
-            .map(|chr| Cell::from(chr))
-            .unwrap_or(Cell::Wall)
+        self.get_posn_in_dir(from, direction)
+            .and_then(|pos| self.chars.get(pos).map(|chr| (Cell::from(chr), Some(pos))))
+            .unwrap_or((Cell::Wall, None))
     }
 
-    fn update(&mut self, direction: CardinalDirection) -> Result<(), MazeError> {
+    fn update(&self, from: &usize, direction: CardinalDirection) -> Result<usize, MazeError> {
         println!("attempting to go {direction}");
-        self.loc = self
-            .get_posn_in_dir(direction)
+        let to = self
+            .get_posn_in_dir(from, direction)
             .and_then(|pos| {
                 let cell = self.chars.get(pos).map(|chr| Cell::from(chr))?;
                 match cell {
@@ -91,9 +91,26 @@ impl Maze for TextMaze {
             })
             .ok_or(MazeError::UpdateError(direction))?;
 
-        println!("newstate:\n{self}");
+        println!("newstate:\n{}", self.render(&to));
 
-        Ok(())
+        Ok(to)
+    }
+
+    fn render(&self, loc: &usize) -> String {
+        let marked: Vec<String> = self
+            .chars
+            .iter()
+            .enumerate()
+            .map(|(idx, chr)| {
+                if &idx == loc {
+                    String::from("X")
+                } else {
+                    chr.to_string()
+                }
+            })
+            .collect();
+
+        format!("{}", marked.join(""))
     }
 }
 
@@ -102,7 +119,7 @@ impl TryFrom<&str> for TextMaze {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         // println!("creating maze from {value}");
-        let (chars, maybe_loc, maybe_width) =
+        let (chars, maybe_start, maybe_width) =
             value
                 .chars()
                 .enumerate()
@@ -127,7 +144,7 @@ impl TryFrom<&str> for TextMaze {
                     Ok(acc)
                 })?;
 
-        let loc = maybe_loc.ok_or(MazeError::CreationError(String::from(
+        let start = maybe_start.ok_or(MazeError::CreationError(String::from(
             "TextMaze must specify start location w/ 'S'",
         )))?;
         let width = match maybe_width {
@@ -138,26 +155,11 @@ impl TryFrom<&str> for TextMaze {
             ))),
         }?;
 
-        Ok(TextMaze { chars, loc, width })
-    }
-}
-
-impl Display for TextMaze {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let marked: Vec<String> = self
-            .chars
-            .iter()
-            .enumerate()
-            .map(|(idx, chr)| {
-                if idx == self.loc {
-                    String::from("X")
-                } else {
-                    chr.to_string()
-                }
-            })
-            .collect();
-
-        write!(f, "{}", marked.join(""))
+        Ok(TextMaze {
+            chars,
+            start,
+            width,
+        })
     }
 }
 
@@ -221,9 +223,11 @@ S+"#;
     #[case::down((" S\n  ", CardinalDirection::South), " S\n X")]
     #[case::left(("  \n S", CardinalDirection::West), "  \nXS")]
     fn test_move_open(#[case] (state, direction): (&str, CardinalDirection), #[case] exp: String) {
-        let mut maze = TextMaze::try_from(state).expect("maze to create successfully");
-        maze.update(direction).expect("state to update succesfully");
-        let act = maze.to_string();
+        let maze = TextMaze::try_from(state).expect("maze to create successfully");
+        let new_loc = maze
+            .update(&maze.start, direction)
+            .expect("state to update succesfully");
+        let act = maze.render(&new_loc);
 
         assert_eq!(act, exp)
     }
@@ -239,12 +243,12 @@ S+"#;
         direction: CardinalDirection,
         #[values(WALL_MAZE, TOPL_MAZE, TOPR_MAZE, BOTL_MAZE, BOTR_MAZE)] state: &str,
     ) {
-        let mut maze = TextMaze::try_from(state).expect("maze to create successfully");
+        let maze = TextMaze::try_from(state).expect("maze to create successfully");
 
-        match maze.update(direction) {
-            Ok(_) => panic!(
+        match maze.update(&maze.start, direction) {
+            Ok(new_loc) => panic!(
                 "should have returned error when trying to move {direction:?} in maze:\n{state}\ninstead, got new state:\n{}",
-                maze.to_string()
+                maze.render(&new_loc)
             ),
 
             Err(MazeError::UpdateError(_)) => (),

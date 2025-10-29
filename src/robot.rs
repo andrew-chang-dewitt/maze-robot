@@ -1,50 +1,54 @@
-use std::{error::Error, fmt::Display};
+use std::{error::Error, fmt::Display, marker::PhantomData};
 
 use crate::{
     CARD_DIR_ARR, CardinalDirection, Cell, Maze,
     maze::{MazeError, TextMaze},
 };
 
-pub struct Robot<M: Maze> {
+pub struct Robot<M, Loc>
+where
+    M: Maze<Loc>,
+{
     state: M,
-    facing: CardinalDirection,
+    _phantom_loc: PhantomData<Loc>,
 }
 
-impl<M: Maze> Robot<M> {
-    pub fn new(state: M, facing: CardinalDirection) -> Self {
-        Robot { state, facing }
+impl<M, Loc> Robot<M, Loc>
+where
+    M: Maze<Loc>,
+{
+    pub fn new(state: M) -> Self {
+        Robot {
+            state,
+            _phantom_loc: PhantomData,
+        }
     }
 
-    pub fn peek(&self, direction: CardinalDirection) -> Cell {
-        self.state.look_dir(direction)
+    pub fn peek(&self, from: &Loc, direction: CardinalDirection) -> (Cell, Option<Loc>) {
+        self.state.look_dir(from, direction)
     }
 
-    pub fn peek_all(&self) -> [Cell; 4] {
-        [0, 1, 2, 3].map(|idx| self.peek(CARD_DIR_ARR[idx]))
+    pub fn peek_all(&self, from: &Loc) -> [(Cell, Option<Loc>); 4] {
+        [0, 1, 2, 3].map(|idx| self.peek(from, CARD_DIR_ARR[idx]))
     }
 
-    pub fn go(&mut self, direction: CardinalDirection) -> Result<(), RobotError> {
+    pub fn go(&self, from: &Loc, direction: CardinalDirection) -> Result<Loc, RobotError> {
         self.state
-            .update(direction)
-            .map_err(|e| RobotError::from((e, &self.state)))?;
-        self.facing = direction;
-        println!("Robot moved, now facing {}", self.facing);
-
-        Ok(())
-    }
-
-    pub fn get_facing(&self) -> CardinalDirection {
-        self.facing
+            .update(from, direction)
+            .map_err(|e| RobotError::from((e, self.state.render(from))))
     }
 }
 
-impl TryFrom<(&str, CardinalDirection)> for Robot<TextMaze> {
-    type Error = RobotError;
+impl Robot<TextMaze, usize> {
+    pub fn try_new(state: &str) -> Result<(Self, usize), RobotError> {
+        TextMaze::try_from(state)
+            .map(|maze| {
+                let start = maze.start;
+                let robot = Robot::new(maze);
 
-    fn try_from((text, facing): (&str, CardinalDirection)) -> Result<Self, Self::Error> {
-        let maze = TextMaze::try_from(text).map_err(|e| RobotError::from((e, text)))?;
-
-        Ok(Robot::new(maze, facing))
+                (robot, start)
+            })
+            .map_err(|e| RobotError::from((e, state)))
     }
 }
 
@@ -102,8 +106,8 @@ S "#;
     pub const BOTR_MAZE: &str = r#"  
  S"#;
 
-    fn make_robot(maze: &str) -> Robot<TextMaze> {
-        Robot::try_from((maze, CardinalDirection::North)).expect("Robot creates successfully")
+    fn make_robot(maze: &str) -> (Robot<TextMaze, usize>, usize) {
+        Robot::try_new(maze).expect("Robot creates successfully")
     }
 
     #[rstest]
@@ -116,10 +120,10 @@ S "#;
         )]
         direction: CardinalDirection,
     ) {
-        let rob = make_robot(WALL_MAZE);
+        let (rob, start) = make_robot(WALL_MAZE);
 
-        match rob.peek(direction) {
-            Cell::Wall => (),
+        match rob.peek(&start, direction) {
+            (Cell::Wall, _) => (),
             _ => panic!("Expected peeking in {direction:?} to return Cell::Wall"),
         }
     }
@@ -134,22 +138,27 @@ S "#;
         )]
         direction: CardinalDirection,
     ) {
-        let rob = make_robot(OPEN_MAZE);
+        let (rob, start) = make_robot(OPEN_MAZE);
 
-        match rob.peek(direction) {
-            Cell::Open => (),
+        match rob.peek(&start, direction) {
+            (Cell::Open, _) => (),
             _ => panic!("Expected peeking in {direction:?} to return Cell::Open"),
         }
     }
 
     #[rstest]
-    #[case((TOPL_MAZE,CardinalDirection::North),Cell::Wall)]
-    #[case((TOPL_MAZE,CardinalDirection::West),Cell::Wall)]
-    #[case((TOPL_MAZE,CardinalDirection::South),Cell::Open)]
-    #[case((TOPL_MAZE,CardinalDirection::East),Cell::Open)]
-    fn test_peek_topl_corner(#[case] (maze, dir): (&str, CardinalDirection), #[case] exp: Cell) {
-        let rob = make_robot(maze);
-        let act = rob.peek(dir);
+    // r#"S \n"
+    //   "  "#;
+    #[case((TOPL_MAZE,CardinalDirection::North),(Cell::Wall, None))]
+    #[case((TOPL_MAZE,CardinalDirection::West), (Cell::Wall, None))]
+    #[case((TOPL_MAZE,CardinalDirection::South),(Cell::Open, Some(3)))]
+    #[case((TOPL_MAZE,CardinalDirection::East), (Cell::Open, Some(1)))]
+    fn test_peek_topl_corner(
+        #[case] (maze, dir): (&str, CardinalDirection),
+        #[case] exp: (Cell, Option<usize>),
+    ) {
+        let (rob, start) = make_robot(maze);
+        let act = rob.peek(&start, dir);
 
         assert_eq!(act, exp)
     }
@@ -160,8 +169,8 @@ S "#;
     #[case((TOPR_MAZE,CardinalDirection::South),Cell::Open)]
     #[case((TOPR_MAZE,CardinalDirection::West),Cell::Open)]
     fn test_peek_topr_corner(#[case] (maze, dir): (&str, CardinalDirection), #[case] exp: Cell) {
-        let rob = make_robot(maze);
-        let act = rob.peek(dir);
+        let (rob, start) = make_robot(maze);
+        let (act, _) = rob.peek(&start, dir);
 
         assert_eq!(act, exp)
     }
@@ -172,8 +181,8 @@ S "#;
     #[case((BOTL_MAZE,CardinalDirection::North),Cell::Open)]
     #[case((BOTL_MAZE,CardinalDirection::East),Cell::Open)]
     fn test_peek_botl_corner(#[case] (maze, dir): (&str, CardinalDirection), #[case] exp: Cell) {
-        let rob = make_robot(maze);
-        let act = rob.peek(dir);
+        let (rob, start) = make_robot(maze);
+        let (act, _) = rob.peek(&start, dir);
 
         assert_eq!(act, exp)
     }
@@ -184,16 +193,16 @@ S "#;
     #[case((BOTR_MAZE,CardinalDirection::North),Cell::Open)]
     #[case((BOTR_MAZE,CardinalDirection::West),Cell::Open)]
     fn test_peek_botr_corner(#[case] (maze, dir): (&str, CardinalDirection), #[case] exp: Cell) {
-        let rob = make_robot(maze);
-        let act = rob.peek(dir);
+        let (rob, start) = make_robot(maze);
+        let (act, _) = rob.peek(&start, dir);
 
         assert_eq!(act, exp)
     }
 
     #[test]
     fn test_peek_all() {
-        let rob = make_robot("+S \n+F+");
-        let act = rob.peek_all();
+        let (rob, start) = make_robot("+S \n+F+");
+        let act = rob.peek_all(&start).map(|(c, _)| c);
         let exp = [Cell::Wall, Cell::Open, Cell::Finish, Cell::Wall];
 
         assert_eq!(act, exp)
@@ -201,24 +210,28 @@ S "#;
 
     #[rstest]
     fn test_peek_finish() {
-        let rob = make_robot(FNSH_MAZE);
-        let act = rob.peek(CardinalDirection::East);
+        let (rob, start) = make_robot(FNSH_MAZE);
+        let (act, _) = rob.peek(&start, CardinalDirection::East);
 
         assert_eq!(act, Cell::Finish)
     }
 
+    //  OPEN_MAZE:
+    //  r#"   \n"
+    //    " S \n"
+    //    "   "#;
     #[rstest]
-    fn test_go_open(
-        #[values(
-            CardinalDirection::North,
-            CardinalDirection::East,
-            CardinalDirection::South,
-            CardinalDirection::West
-        )]
-        direction: CardinalDirection,
-    ) -> Result<(), RobotError> {
-        let mut rob = make_robot(OPEN_MAZE);
+    #[case(CardinalDirection::North, 1)]
+    #[case(CardinalDirection::East, 6)]
+    #[case(CardinalDirection::South, 9)]
+    #[case(CardinalDirection::West, 4)]
+    fn test_go_open(#[case] direction: CardinalDirection, #[case] exp: usize) {
+        let (rob, start) = make_robot(OPEN_MAZE);
 
-        rob.go(direction)
+        let act = rob
+            .go(&start, direction)
+            .expect("robot should move successfully");
+
+        assert_eq!(exp, act);
     }
 }
