@@ -5,9 +5,10 @@ use clap::Parser;
 
 use maze_robot::Robot;
 
-mod solution;
+// mod solution;
+mod graph;
 
-use solution::{find_solution, render_solution};
+// use solution::{find_solution, render_solution};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -21,11 +22,12 @@ fn main() -> anyhow::Result<()> {
         read_to_string(app.maze_file).context("Failed to load maze from file {app.maze_file}")?;
     let (robot, start) = Robot::try_new(maze_text.as_str()).unwrap();
 
-    let solution = find_solution(robot)
-        .context("Error encountered while finding solution")
-        .map(|solution| render_solution(solution))?;
+    todo!()
+    // let solution = find_solution(robot, start)
+    //     .context("Error encountered while finding solution")
+    //     .map(|solution| render_solution(solution))?;
 
-    println!("Maze solved!\n\n{solution}");
+    // println!("Maze solved!\n\n{solution}");
 
-    Ok(())
+    // Ok(())
 }
