@@ -69,7 +69,7 @@ trait HasKey {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, hash::Hash};
 
     use rstest::{fixture, rstest};
 
@@ -146,31 +146,80 @@ mod tests {
         assert_eq!(act, exp);
     }
 
-    impl<'a> GraphType<'a, isize, isize> for HashMap<isize, [isize; 4]> {
-        fn empty() -> Self {
-            HashMap::new()
+    // impl<'a> GraphType<'a, isize, isize> for HashMap<isize, [isize; 4]> {
+    //     fn empty() -> Self {
+    //         HashMap::new()
+    //     }
+    // }
+
+    struct MapGraph<'a, K, N, E, V>(Option<N>, HashMap<N, V>)
+    where
+        K: Eq,
+        N: Eq + Hash + HasKey<Key = K>,
+        E: 'a + HasKey<Key = K>,
+        &'a V: 'a + IntoIterator<Item = &'a E>;
+
+    struct MapContext<'a, K, N, E, V>(N, &'a HashMap<N, V>)
+    where
+        K: 'a + Eq,
+        N: Eq + Hash + HasKey<Key = K>,
+        E: 'a + HasKey<Key = K>,
+        &'a V: 'a + IntoIterator<Item = &'a E>;
+
+    impl<'a, K, N, E, V> MapGraph<'a, K, N, E, V>
+    where
+        K: 'a + Eq,
+        N: Eq + Hash + HasKey<Key = K>,
+        E: 'a + HasKey<Key = K>,
+        &'a V: 'a + IntoIterator<Item = &'a E>,
+    {
+        pub fn new() -> Self {
+            MapGraph(None, HashMap::<N, V>::new())
+        }
+
+        fn get_node_ctx(key: K) -> Option<MapContext<'a, K, N, E, V>> {
+            todo!()
         }
     }
 
-    struct MapGraph<K, E, V>(Option<K>, HashMap<K, V>)
+    impl<'a, K, N, E, V> GraphType<'a, MapContext<'a, K, N, E, V>, <K as HasKey>::Key>
+        for MapGraph<'a, K, N, E, V>
     where
-        K: HasKey,
-        E: HasKey,
-        V: IntoIterator<Item = E>;
-
-    impl<'a, K, E, V, C> GraphType<'a, C, <K as HasKey>::Key> for MapGraph<K, E, V>
-    where
-        K: HasKey,
-        E: HasKey,
-        V: IntoIterator<Item = E>,
-        C: ContextType<'a, <E as HasKey>::Key>,
+        K: 'a + Eq,
+        N: Eq + Hash + HasKey<Key = K>,
+        E: 'a + HasKey<Key = K>,
+        &'a V: 'a + IntoIterator<Item = &'a E>,
     {
         fn empty() -> Self {
             Self(None, HashMap::new())
         }
     }
 
-    struct MapContext<'a>()
+    impl<'a, K, N, E, V> ContextType<'a, <K as HasKey>::Key> for MapContext<'a, K, N, E, V>
+    where
+        K: 'a + Eq,
+        N: Eq + Hash + HasKey<Key = K>,
+        E: 'a + HasKey<Key = K>,
+        &'a V: 'a + IntoIterator<Item = &'a E>,
+    {
+        type Node = K;
+        type Edge = E;
+
+        fn get_edges(&self) -> impl Iterator<Item = &'a Self::Edge> {
+            // get value from hashmap for key
+            self.1
+                .get(&self.0)
+                .expect("node must be in map")
+                .into_iter()
+            // return as iter of edges
+        }
+    }
+
+    impl<'a> From<HashMap<isize,[isize;4]>> for MapGraph<'a,isize,isize,isize,[isize;4]> {
+        fn from(value: HashMap<isize,[isize;4]>) -> Self {
+            todo!()
+        }
+    }
 
     // 0 --- 1 --- 5 ---   (0, [1, 3, 2, -1]),
     // | \_  |     | \_|   (1, [5, 3, 0, -1]),
@@ -180,20 +229,19 @@ mod tests {
     // |   \ | /           (5, [5, 6, 1, -1]),
     // 4     6             (6, [3, 5, 2, -1]),
     #[rstest]
-    #[case(0,vec![0,1,5,6,3,2,4])]
-    #[case(1,vec![1,5,6,3,2,0,4])]
-    #[case(2,vec![2,0,1,5,6,3,4])]
-    #[case(3,vec![3,1,5,6,3,2,4])]
-    #[case(4,vec![4,2,0,1,5,6,3])]
-    #[case(5,vec![5,6,3,1,0,2,4])]
-    #[case(6,vec![6,3,1,5,0,2,4])]
+    #[case(( 0,[1, 3, 2, -1])  ,vec![0,1,5,6,3,2,4])]
+    #[case(( 1,[5, 3, 0, -1])  ,vec![1,5,6,3,2,0,4])]
+    #[case(( 2,[0, 3, 6, 4])   ,vec![2,0,1,5,6,3,4])]
+    #[case(( 3,[1, 6, 2, 0])   ,vec![3,1,5,6,3,2,4])]
+    #[case(( 4,[2, -1, -1, -1]),vec![4,2,0,1,5,6,3])]
+    #[case(( 5,[5, 6, 1, -1])  ,vec![5,6,3,1,0,2,4])]
+    #[case(( 6,[3, 5, 2, -1])  ,vec![6,3,1,5,0,2,4])]
     fn can_iterate_graph_of_one_node(
-        #[case] key: isize,
+        #[case] map: (isize, [isize; 4]),
         #[case] exp: Vec<isize>,
         adj_list: HashMap<isize, [isize; 4]>,
     ) {
-        let ctx = TestCtx(key, &adj_list);
-        let graph = TestGraph::new(ctx);
+        let graph = MapGraph::from(HashMap::from([map]));
         let act: Vec<isize> = graph.iter_dfs().map(|&i| i).collect();
 
         assert_eq!(exp, act);
