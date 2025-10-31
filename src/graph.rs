@@ -1,61 +1,77 @@
-use std::{fmt::Debug, hash::Hash, marker::PhantomData};
+//! Models a graph as a structurally recursive sum of a Node in context* & the Empty node.
+//!
+//! A Node is assumed to know only itself (a unique key & possibly any other data to store with
+//! it)&mdash;meaning a Node has no concept of edges, neighbor, or other ideas of its place within
+//! a Graph. Instead, a Node's context is held outside of it (in an object implementing behaviour
+//! appropriately named `ContextType`) & together, they can be used to locate neighbors & traverse
+//! the graph.
 
-/// A structural graph implementation.
+use std::marker::PhantomData;
 
-/// The composition of a graph Node, or vertex.
-///
-/// Consists of a unique identifier (`Key`), any associated `Data`, & a reference to a parent Node.
-#[derive(Debug)]
-struct Node<Key: Eq + PartialEq + Debug, Data> {
-    key: Key,
-    data: Data,
+/// The top-level sum-type container, indicating if a graph has members, or if it is empty. Most
+/// graph behaviours are implemented here, including methods for getting an iterator over the
+/// graph's nodes.
+enum FunGraph<'a, Ctx, Key>
+where
+    Key: Eq,
+    Ctx: ContextType<'a, Key>,
+{
+    Graph(Ctx, &'a Self, PhantomData<Key>),
+    Empty,
 }
 
-/// Node equality is decided soley on key equality w/ no regard for any associated node data.
-impl<Key: Eq + Debug, Data> PartialEq for Node<Key, Data> {
-    fn eq(&self, other: &Self) -> bool {
-        self.key == other.key
+impl<'a, Ctx, Key> FunGraph<'a, Ctx, Key>
+where
+    Key: Eq,
+    Ctx: ContextType<'a, Key>,
+{
+    pub fn new() -> Self {
+        Self::Empty
     }
 }
 
-/// The behavioural description of a structurally recursive Graph.
-///
-/// Describes how a graph Node knows what its neighbors are, as well as how to get back to its
-/// parent Node, if it has one.
-trait Graph {
-    /// The node type for this graph. Must also be an implementer of Graph.
-    type Item: Graph + Eq;
+trait GraphType<'a, Ctx, Key>
+where
+    Key: Eq,
+    Ctx: ContextType<'a, Key>,
+{
+    // type Error;
 
-    fn get_neighbors(&self) -> impl Iterator<Item = Self::Item>;
-    fn get_parent(&self) -> Option<Self::Item>;
+    fn empty() -> Self;
+    // fn add_node_with_ctx(&mut self, ctx: Ctx) -> &Self {}
+    // fn add_edge(&mut self, from: Key, to: Key) -> Result<&Self, Self::Error>;
+
+    // fn get(&self, key: Key) -> Option<&<Ctx as ContextType<'a, Key>>::Node>;
 }
 
-/// Stores state for iterating over a graph.
-struct GraphIter<'a, G: Graph, Order> {
-    _next: G,
-    _lifetime: PhantomData<&'a G::Item>,
-    _order: PhantomData<Order>,
-}
-
-/// Zero-Sized Type to indicate a Depth-First-Search traversal order when iterating over a graph.
-struct DFS;
-
-/// Zero-Sized Type to indicate a Breadth-First-Search traversal order when iterating over a graph.
-struct BFS;
-
-impl<'a, G: Graph> Iterator for GraphIter<'a, G, DFS> {
-    type Item = G::Item;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+impl<'a, Ctx, Key> GraphType<'a, Ctx, Key> for FunGraph<'a, Ctx, Key>
+where
+    Key: Eq,
+    Ctx: ContextType<'a, Key>,
+{
+    fn empty() -> Self {
+        Self::Empty
     }
+}
+
+trait ContextType<'a, Key: Eq = Self> {
+    type Node: 'a + HasKey<Key = Key>;
+    type Edge: 'a + HasKey<Key = Key>;
+
+    fn get_edges(&self) -> impl Iterator<Item = &'a Self::Edge>;
+}
+
+trait HasKey {
+    type Key: Eq;
+
+    fn key_ref(&self) -> &Self::Key;
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
-    use rstest::fixture;
+    use rstest::{fixture, rstest};
 
     use super::*;
 
@@ -83,29 +99,129 @@ mod tests {
         ])
     }
 
-    #[derive(Eq)]
-    struct AdjNode(isize, Option<isize>);
+    struct TestCtx<'a>(isize, &'a HashMap<isize, [isize; 4]>);
 
-    impl PartialEq for AdjNode {
-        fn eq(&self, other: &Self) -> bool {
-            self.0 == other.0
+    impl<'a> HasKey for TestCtx<'a> {
+        type Key = isize;
+
+        fn key_ref(&self) -> &Self::Key {
+            &self.0
         }
     }
 
-    impl Graph for AdjNode {
-        type Item = Self;
+    impl<'a> ContextType<'a, isize> for TestCtx<'a> {
+        type Node = isize;
+        type Edge = isize;
 
-        fn get_parent(&self) -> Option<Self::Item> {
-            todo!()
+        fn get_edges(&self) -> impl Iterator<Item = &'a Self::Edge> {
+            self.1
+                .get(&self.0)
+                .expect("node must exist")
+                .iter()
+                .filter_map(|i| if *i >= 0 { Some(i) } else { None })
         }
+    }
 
-        fn get_neighbors(&self) -> impl Iterator<Item = Self::Item> {
-            todo!()
+    impl<T: Eq> HasKey for T {
+        type Key = Self;
+
+        fn key_ref(&self) -> &Self::Key {
+            &self
         }
     }
 
     #[rstest]
-    fn can_get_neighbors_using_adj_list(graph: HashMap<isize, [isize; 4]>) {
-        todo!()
+    #[case(0,vec![1,3,2])]
+    #[case(2,vec![0,3,6,4])]
+    #[case(4,vec![2])]
+    #[case(5,vec![5,6,1])]
+    fn can_get_neighbors_using_adj_list(
+        #[case] key: isize,
+        #[case] exp: Vec<isize>,
+        adj_list: HashMap<isize, [isize; 4]>,
+    ) {
+        let ctx = TestCtx(key, &adj_list);
+        let act: Vec<isize> = ctx.get_edges().map(|&i| i).collect();
+
+        assert_eq!(act, exp);
     }
+
+    impl<'a> GraphType<'a, isize, isize> for HashMap<isize, [isize; 4]> {
+        fn empty() -> Self {
+            HashMap::new()
+        }
+    }
+
+    struct MapGraph<K, E, V>(Option<K>, HashMap<K, V>)
+    where
+        K: HasKey,
+        E: HasKey,
+        V: IntoIterator<Item = E>;
+
+    impl<'a, K, E, V, C> GraphType<'a, C, <K as HasKey>::Key> for MapGraph<K, E, V>
+    where
+        K: HasKey,
+        E: HasKey,
+        V: IntoIterator<Item = E>,
+        C: ContextType<'a, <E as HasKey>::Key>,
+    {
+        fn empty() -> Self {
+            Self(None, HashMap::new())
+        }
+    }
+
+    struct MapContext<'a>()
+
+    // 0 --- 1 --- 5 ---   (0, [1, 3, 2, -1]),
+    // | \_  |     | \_|   (1, [5, 3, 0, -1]),
+    // |   \ |    /        (2, [0, 3, 6, 4]),
+    // 2 --- 3   /         (3, [1, 6, 2, 0]),
+    // | \_  |  /          (4, [2, -1, -1, -1]),
+    // |   \ | /           (5, [5, 6, 1, -1]),
+    // 4     6             (6, [3, 5, 2, -1]),
+    #[rstest]
+    #[case(0,vec![0,1,5,6,3,2,4])]
+    #[case(1,vec![1,5,6,3,2,0,4])]
+    #[case(2,vec![2,0,1,5,6,3,4])]
+    #[case(3,vec![3,1,5,6,3,2,4])]
+    #[case(4,vec![4,2,0,1,5,6,3])]
+    #[case(5,vec![5,6,3,1,0,2,4])]
+    #[case(6,vec![6,3,1,5,0,2,4])]
+    fn can_iterate_graph_of_one_node(
+        #[case] key: isize,
+        #[case] exp: Vec<isize>,
+        adj_list: HashMap<isize, [isize; 4]>,
+    ) {
+        let ctx = TestCtx(key, &adj_list);
+        let graph = TestGraph::new(ctx);
+        let act: Vec<isize> = graph.iter_dfs().map(|&i| i).collect();
+
+        assert_eq!(exp, act);
+    }
+
+    // // 0 --- 1 --- 5 ---   (0, [1, 3, 2, -1]),
+    // // | \_  |     | \_|   (1, [5, 3, 0, -1]),
+    // // |   \ |    /        (2, [0, 3, 6, 4]),
+    // // 2 --- 3   /         (3, [1, 6, 2, 0]),
+    // // | \_  |  /          (4, [2, -1, -1, -1]),
+    // // |   \ | /           (5, [5, 6, 1, -1]),
+    // // 4     6             (6, [3, 5, 2, -1]),
+    // #[rstest]
+    // #[case(0,vec![0,1,5,6,3,2,4])]
+    // #[case(1,vec![1,5,6,3,2,0,4])]
+    // #[case(2,vec![2,0,1,5,6,3,4])]
+    // #[case(3,vec![3,1,5,6,3,2,4])]
+    // #[case(4,vec![4,2,0,1,5,6,3])]
+    // #[case(5,vec![5,6,3,1,0,2,4])]
+    // #[case(6,vec![6,3,1,5,0,2,4])]
+    // fn can_iterate_using_dfs_order(
+    //     #[case] key: isize,
+    //     #[case] exp: Vec<isize>,
+    //     adj_list: HashMap<isize, [isize; 4]>,
+    // ) {
+    //     let node = AdjNode(key, &adj_list);
+    //     let act: Vec<isize> = node.iter_dfs().map(|adj| adj.0).collect();
+
+    //     assert_eq!(exp, act);
+    // }
 }

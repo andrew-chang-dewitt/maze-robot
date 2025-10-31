@@ -20,7 +20,7 @@ fn main() -> anyhow::Result<()> {
     let app = App::parse();
     let maze_text =
         read_to_string(app.maze_file).context("Failed to load maze from file {app.maze_file}")?;
-    let (robot, start) = Robot::try_new(maze_text.as_str()).unwrap();
+    let (_robot, _start) = Robot::try_new(maze_text.as_str()).unwrap();
 
     todo!()
     // let solution = find_solution(robot, start)
