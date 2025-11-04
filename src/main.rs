@@ -72,10 +72,10 @@ fn solve_from(maze_chars: &Vec<char>, width: usize, start: usize) -> anyhow::Res
             let mut finish_found: Option<usize> = None;
 
             for (idx, &direction) in [
-                Direction::Up,
-                Direction::Right,
-                Direction::Down,
-                Direction::Left,
+                Direction::North,
+                Direction::East,
+                Direction::South,
+                Direction::West,
             ]
             .iter()
             .enumerate()
@@ -135,7 +135,7 @@ fn peek(maze: &Vec<char>, width: usize, direction: Direction, position: usize) -
     // println!("checking {direction:?} from {position}");
 
     let result = match direction {
-        Direction::Up => {
+        Direction::North => {
             // no up if in top row
             if position < width {
                 None
@@ -143,7 +143,7 @@ fn peek(maze: &Vec<char>, width: usize, direction: Direction, position: usize) -
                 Some(position - width - 1)
             }
         }
-        Direction::Right => {
+        Direction::East => {
             // no right if in right col
             let res = position + 1;
 
@@ -153,13 +153,13 @@ fn peek(maze: &Vec<char>, width: usize, direction: Direction, position: usize) -
                 Some(res)
             }
         }
-        Direction::Down => {
+        Direction::South => {
             // no down if in bottom row
             let res = position + width + 1;
 
             if res > maze.len() { None } else { Some(res) }
         }
-        Direction::Left => {
+        Direction::West => {
             // no left if in left column
             let res = position - 1;
 
