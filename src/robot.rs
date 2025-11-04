@@ -1,25 +1,40 @@
-use std::{error::Error, fmt::Display};
+use std::{cell::RefCell, error::Error, fmt::Display};
 
 use crate::{
-    Cell, Direction, Maze,
+    Cell, DIR_ARR, Direction, Maze,
     maze::{MazeError, TextMaze},
 };
 
 pub struct Robot<M: Maze> {
-    state: M,
+    // maze is actually an _external_ enviroment the robot exists _inside_ of
+    // the robot has no notion of state itself--it simply looks & attempts to travel in specified
+    // directions. as far as it is concerned, no state changes happen for either of those actions.
+    // to model this, the **interior mutability** pattern is used by placing the env inside a
+    // RefCell inside our Robot, then calling env methods on it to perform Robot actions w/out
+    // worrying about any side effects
+    env: RefCell<M>,
 }
 
 impl<M: Maze> Robot<M> {
     fn new(state: M) -> Self {
-        Robot { state }
+        Robot {
+            env: RefCell::new(state),
+        }
     }
 
     fn peek(&self, direction: Direction) -> Cell {
-        self.state.look_dir(direction)
+        self.env.borrow().look_dir(direction)
     }
 
-    fn go(&mut self, direction: Direction) -> Result<(), RobotError> {
-        self.state.update(direction).map_err(|e| e.into())
+    fn peek_all(&self) -> [(Cell, Direction); 4] {
+        DIR_ARR.map(|dir| (self.peek(dir), dir))
+    }
+
+    fn go(&self, direction: Direction) -> Result<(), RobotError> {
+        self.env
+            .borrow_mut()
+            .move_dir(direction)
+            .map_err(|e| e.into())
     }
 }
 
