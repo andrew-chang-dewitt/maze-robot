@@ -27,7 +27,7 @@ impl TryFrom<&str> for Robot<TextMaze> {
     type Error = RobotError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let maze = TextMaze::try_from(value).map_err(|e| e.into())?;
+        let maze = TextMaze::try_from(value).map_err(|e| RobotError::from(e))?;
 
         Ok(Robot::new(maze))
     }
@@ -54,11 +54,11 @@ impl Display for RobotError {
 
 impl Error for RobotError {}
 
-impl Into<RobotError> for MazeError {
-    fn into(self) -> RobotError {
-        match self {
-            MazeError::CreationError(msg) => RobotError::CreationError(msg),
-            MazeError::UpdateError(dir) => RobotError::NavigationError(dir),
+impl From<MazeError> for RobotError {
+    fn from(value: MazeError) -> RobotError {
+        match value {
+            MazeError::CreationError(msg) => Self::CreationError(msg),
+            MazeError::MoveError(dir) => Self::NavigationError(dir),
         }
     }
 }

@@ -2,16 +2,28 @@ use std::{error::Error, fmt::Display};
 
 use crate::{Cell, Direction};
 
+/// A Maze is the actual environment our robot will move in.
+///
+/// As a maze is unknown to the robot, it provides very little in the way of information, exposing
+/// only two capabilities: look in some direction (`look_dir`) & move in some direction
+/// (`move_dir`).
 pub trait Maze {
+    /// Look in the given direction tell the caller what type of Cell was seen.
     fn look_dir(&self, direction: Direction) -> Cell;
-    fn update(&mut self, direction: Direction) -> Result<(), MazeError>;
+
+    /// Attempt to move in the given direction.
+    ///
+    /// If not possible, a `MazeError::MoveError` will be returned.
+    fn move_dir(&mut self, direction: Direction) -> Result<(), MazeError>;
 }
 
-/// maze encoded as str where:
+/// A maze encoded by a string, where:
 /// - 'S' is starting location
 /// - 'F' is ending location
 /// - '+' & out of bounds are considered walls
 /// - all others are considered open
+///
+/// Tracks robot location as private state used by the two `Maze` trait methods.
 pub struct TextMaze {
     chars: Vec<char>,
     loc: usize,
@@ -71,7 +83,7 @@ impl Maze for TextMaze {
             .unwrap_or(Cell::Wall)
     }
 
-    fn update(&mut self, direction: Direction) -> Result<(), MazeError> {
+    fn move_dir(&mut self, direction: Direction) -> Result<(), MazeError> {
         self.loc = self
             .get_posn_in_dir(direction)
             .and_then(|pos| {
@@ -81,7 +93,7 @@ impl Maze for TextMaze {
                     _ => Some(pos),
                 }
             })
-            .ok_or(MazeError::UpdateError(direction))?;
+            .ok_or(MazeError::MoveError(direction))?;
 
         Ok(())
     }
@@ -169,14 +181,14 @@ impl From<&char> for Cell {
 #[derive(Debug)]
 pub enum MazeError {
     CreationError(String),
-    UpdateError(Direction),
+    MoveError(Direction),
 }
 
 impl Display for MazeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let out = match self {
             Self::CreationError(msg) => format!("CreationError: {msg}"),
-            Self::UpdateError(direction) => {
+            Self::MoveError(direction) => {
                 format!("UpdateError: unable to go {direction} from current location")
             }
         };
@@ -212,7 +224,8 @@ S+"#;
     #[case::left(("  \n S", Direction::West), "  \nXS")]
     fn test_move_open(#[case] (state, direction): (&str, Direction), #[case] exp: String) {
         let mut maze = TextMaze::try_from(state).expect("maze to create successfully");
-        maze.update(direction).expect("state to update succesfully");
+        maze.move_dir(direction)
+            .expect("state to update succesfully");
         let act = maze.to_string();
 
         assert_eq!(act, exp)
@@ -226,13 +239,13 @@ S+"#;
     ) {
         let mut maze = TextMaze::try_from(state).expect("maze to create successfully");
 
-        match maze.update(direction) {
+        match maze.move_dir(direction) {
             Ok(_) => panic!(
                 "should have returned error when trying to move {direction:?} in maze:\n{state}\ninstead, got new state:\n{}",
                 maze.to_string()
             ),
 
-            Err(MazeError::UpdateError(_)) => (),
+            Err(MazeError::MoveError(_)) => (),
             Err(e) => panic!("expected UpdateError, got {e:?}"),
         }
     }
