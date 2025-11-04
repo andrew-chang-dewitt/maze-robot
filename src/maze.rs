@@ -21,7 +21,7 @@ pub struct TextMaze {
 impl TextMaze {
     fn get_posn_in_dir(&self, direction: Direction) -> Option<usize> {
         match direction {
-            Direction::Up => {
+            Direction::North => {
                 // no up if in top row
                 if self.loc <= self.width {
                     None
@@ -29,7 +29,7 @@ impl TextMaze {
                     Some(self.loc - self.width - 1)
                 }
             }
-            Direction::Down => {
+            Direction::South => {
                 // go down one row by adding width & accounting for newline char
                 let pos = self.loc + self.width + 1;
                 // no down if past end of chars vec
@@ -39,7 +39,7 @@ impl TextMaze {
                     Some(pos)
                 }
             }
-            Direction::Right => {
+            Direction::East => {
                 // go right one col by incrementing pos
                 let pos = self.loc + 1;
                 // no right if past end of chars vec
@@ -49,7 +49,7 @@ impl TextMaze {
                     Some(pos)
                 }
             }
-            Direction::Left => {
+            Direction::West => {
                 // no left if loc already at start
                 if self.loc == 0 {
                     None
@@ -206,10 +206,10 @@ S+"#;
 +S"#;
 
     #[rstest]
-    #[case::up(("  \nS ", Direction::Up), "X \nS ")]
-    #[case::right(("S \n  ", Direction::Right), "SX\n  ")]
-    #[case::down((" S\n  ", Direction::Down), " S\n X")]
-    #[case::left(("  \n S", Direction::Left), "  \nXS")]
+    #[case::up(("  \nS ", Direction::North), "X \nS ")]
+    #[case::right(("S \n  ", Direction::East), "SX\n  ")]
+    #[case::down((" S\n  ", Direction::South), " S\n X")]
+    #[case::left(("  \n S", Direction::West), "  \nXS")]
     fn test_move_open(#[case] (state, direction): (&str, Direction), #[case] exp: String) {
         let mut maze = TextMaze::try_from(state).expect("maze to create successfully");
         maze.update(direction).expect("state to update succesfully");
@@ -220,7 +220,7 @@ S+"#;
 
     #[rstest]
     fn test_move_invalid(
-        #[values(Direction::Up, Direction::Right, Direction::Down, Direction::Left)]
+        #[values(Direction::North, Direction::East, Direction::South, Direction::West)]
         direction: Direction,
         #[values(WALL_MAZE, TOPL_MAZE, TOPR_MAZE, BOTL_MAZE, BOTR_MAZE)] state: &str,
     ) {

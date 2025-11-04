@@ -91,7 +91,7 @@ S "#;
 
     #[rstest]
     fn test_peek_wall(
-        #[values(Direction::Up, Direction::Right, Direction::Down, Direction::Left)]
+        #[values(Direction::North, Direction::East, Direction::South, Direction::West)]
         direction: Direction,
     ) {
         let rob = make_robot(WALL_MAZE);
@@ -104,7 +104,7 @@ S "#;
 
     #[rstest]
     fn test_peek_open(
-        #[values(Direction::Up, Direction::Right, Direction::Down, Direction::Left)]
+        #[values(Direction::North, Direction::East, Direction::South, Direction::West)]
         direction: Direction,
     ) {
         let rob = make_robot(OPEN_MAZE);
@@ -116,10 +116,10 @@ S "#;
     }
 
     #[rstest]
-    #[case((TOPL_MAZE,Direction::Up),Cell::Wall)]
-    #[case((TOPL_MAZE,Direction::Left),Cell::Wall)]
-    #[case((TOPL_MAZE,Direction::Down),Cell::Open)]
-    #[case((TOPL_MAZE,Direction::Right),Cell::Open)]
+    #[case((TOPL_MAZE,Direction::North),Cell::Wall)]
+    #[case((TOPL_MAZE,Direction::West),Cell::Wall)]
+    #[case((TOPL_MAZE,Direction::South),Cell::Open)]
+    #[case((TOPL_MAZE,Direction::East),Cell::Open)]
     fn test_peek_topl_corner(#[case] (maze, dir): (&str, Direction), #[case] exp: Cell) {
         let rob = make_robot(maze);
         let act = rob.peek(dir);
@@ -128,10 +128,10 @@ S "#;
     }
 
     #[rstest]
-    #[case((TOPR_MAZE,Direction::Up),Cell::Wall)]
-    #[case((TOPR_MAZE,Direction::Right),Cell::Wall)]
-    #[case((TOPR_MAZE,Direction::Down),Cell::Open)]
-    #[case((TOPR_MAZE,Direction::Left),Cell::Open)]
+    #[case((TOPR_MAZE,Direction::North),Cell::Wall)]
+    #[case((TOPR_MAZE,Direction::East),Cell::Wall)]
+    #[case((TOPR_MAZE,Direction::South),Cell::Open)]
+    #[case((TOPR_MAZE,Direction::West),Cell::Open)]
     fn test_peek_topr_corner(#[case] (maze, dir): (&str, Direction), #[case] exp: Cell) {
         let rob = make_robot(maze);
         let act = rob.peek(dir);
@@ -140,10 +140,10 @@ S "#;
     }
 
     #[rstest]
-    #[case((BOTL_MAZE,Direction::Down),Cell::Wall)]
-    #[case((BOTL_MAZE,Direction::Left),Cell::Wall)]
-    #[case((BOTL_MAZE,Direction::Up),Cell::Open)]
-    #[case((BOTL_MAZE,Direction::Right),Cell::Open)]
+    #[case((BOTL_MAZE,Direction::South),Cell::Wall)]
+    #[case((BOTL_MAZE,Direction::West),Cell::Wall)]
+    #[case((BOTL_MAZE,Direction::North),Cell::Open)]
+    #[case((BOTL_MAZE,Direction::East),Cell::Open)]
     fn test_peek_botl_corner(#[case] (maze, dir): (&str, Direction), #[case] exp: Cell) {
         let rob = make_robot(maze);
         let act = rob.peek(dir);
@@ -152,10 +152,10 @@ S "#;
     }
 
     #[rstest]
-    #[case((BOTR_MAZE,Direction::Down),Cell::Wall)]
-    #[case((BOTR_MAZE,Direction::Right),Cell::Wall)]
-    #[case((BOTR_MAZE,Direction::Up),Cell::Open)]
-    #[case((BOTR_MAZE,Direction::Left),Cell::Open)]
+    #[case((BOTR_MAZE,Direction::South),Cell::Wall)]
+    #[case((BOTR_MAZE,Direction::East),Cell::Wall)]
+    #[case((BOTR_MAZE,Direction::North),Cell::Open)]
+    #[case((BOTR_MAZE,Direction::West),Cell::Open)]
     fn test_peek_botr_corner(#[case] (maze, dir): (&str, Direction), #[case] exp: Cell) {
         let rob = make_robot(maze);
         let act = rob.peek(dir);
@@ -166,14 +166,14 @@ S "#;
     #[rstest]
     fn test_peek_finish() {
         let rob = make_robot(FNSH_MAZE);
-        let act = rob.peek(Direction::Right);
+        let act = rob.peek(Direction::East);
 
         assert_eq!(act, Cell::Finish)
     }
 
     #[rstest]
     fn test_go_open(
-        #[values(Direction::Up, Direction::Right, Direction::Down, Direction::Left)]
+        #[values(Direction::North, Direction::East, Direction::South, Direction::West)]
         direction: Direction,
     ) -> Result<(), RobotError> {
         let mut rob = make_robot(OPEN_MAZE);
