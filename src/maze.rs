@@ -1,4 +1,7 @@
-use std::{error::Error, fmt::Display};
+use std::{
+    error::Error,
+    fmt::{Debug, Display},
+};
 
 use crate::{Cell, Direction};
 
@@ -7,7 +10,7 @@ use crate::{Cell, Direction};
 /// As a maze is unknown to the robot, it provides very little in the way of information, exposing
 /// only two capabilities: look in some direction (`look_dir`) & move in some direction
 /// (`move_dir`).
-pub trait Maze {
+pub trait Maze: Debug + Display {
     /// Look in the given direction tell the caller what type of Cell was seen.
     fn look_dir(&self, direction: Direction) -> Cell;
 
@@ -24,6 +27,7 @@ pub trait Maze {
 /// - all others are considered open
 ///
 /// Tracks robot location as private state used by the two `Maze` trait methods.
+#[derive(Debug)]
 pub struct TextMaze {
     chars: Vec<char>,
     loc: usize,
@@ -76,7 +80,6 @@ impl TextMaze {
 
 impl Maze for TextMaze {
     fn look_dir(&self, direction: Direction) -> Cell {
-        // println!("looking {direction:?} from {}", self.loc);
         self.get_posn_in_dir(direction)
             .and_then(|pos| self.chars.get(pos))
             .map(|chr| Cell::from(chr))
@@ -93,7 +96,7 @@ impl Maze for TextMaze {
                     _ => Some(pos),
                 }
             })
-            .ok_or(MazeError::MoveError(direction))?;
+            .ok_or(MazeError::MoveError(direction, self.to_string()))?;
 
         Ok(())
     }
@@ -103,13 +106,11 @@ impl TryFrom<&str> for TextMaze {
     type Error = MazeError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        println!("creating maze from {value}");
         let (chars, maybe_loc, maybe_width) =
             value
                 .chars()
                 .enumerate()
                 .try_fold((vec![], None, None), |mut acc, (idx, chr)| {
-                    // println!("checking char {chr:?} @ {idx}");
                     match chr {
                         'S' => acc.1 = Some(idx),
                         '\n' => match acc.2 {
@@ -181,15 +182,15 @@ impl From<&char> for Cell {
 #[derive(Debug)]
 pub enum MazeError {
     CreationError(String),
-    MoveError(Direction),
+    MoveError(Direction, String),
 }
 
 impl Display for MazeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let out = match self {
             Self::CreationError(msg) => format!("CreationError: {msg}"),
-            Self::MoveError(direction) => {
-                format!("UpdateError: unable to go {direction} from current location")
+            Self::MoveError(direction, state) => {
+                format!("MoveError: unable to go {direction} from current location:\n\n{state}\n")
             }
         };
 
@@ -245,7 +246,7 @@ S+"#;
                 maze.to_string()
             ),
 
-            Err(MazeError::MoveError(_)) => (),
+            Err(MazeError::MoveError(_, _)) => (),
             Err(e) => panic!("expected UpdateError, got {e:?}"),
         }
     }
