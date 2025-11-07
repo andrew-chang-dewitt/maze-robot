@@ -1,12 +1,10 @@
 mod maze;
 mod robot;
-mod solution;
 
 use std::fmt::Display;
 
 pub use crate::maze::{Maze, MazeError};
-pub use crate::robot::Robot;
-pub use crate::solution::solve;
+pub use crate::robot::{Robot, RobotInternal};
 
 pub const DIR_ARR: [Direction; 4] = [
     Direction::North,

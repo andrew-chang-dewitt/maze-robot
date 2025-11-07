@@ -2,9 +2,11 @@ use std::{collections::HashSet, fmt::Display};
 
 use anyhow::anyhow;
 
-use crate::{Cell, DIR_ARR, Direction, MazeError, Robot};
+use maze_robot::{Cell, DIR_ARR, Direction, MazeError, Robot};
 
-pub fn solve<M: TryInto<Robot, Error = MazeError>>(maze: M) -> anyhow::Result<Vec<Key>> {
+use crate::text_maze::TextRobot;
+
+pub fn solve<M: TryInto<TextRobot, Error = MazeError>>(maze: M) -> anyhow::Result<Vec<Key>> {
     // set up robot w/ given maze
     let robot = maze.try_into()?;
 
@@ -12,7 +14,7 @@ pub fn solve<M: TryInto<Robot, Error = MazeError>>(maze: M) -> anyhow::Result<Ve
     dfs_path(robot)
 }
 
-fn dfs_path(robot: Robot) -> anyhow::Result<Vec<Key>> {
+fn dfs_path(robot: TextRobot) -> anyhow::Result<Vec<Key>> {
     let mut visited = HashSet::new();
 
     match dfs_helper(&robot, Node::default(), &mut visited) {
@@ -22,7 +24,7 @@ fn dfs_path(robot: Robot) -> anyhow::Result<Vec<Key>> {
     }
 }
 
-fn dfs_helper(robot: &Robot, node: Node, visited: &mut HashSet<Key>) -> Result<(), Solution> {
+fn dfs_helper(robot: &TextRobot, node: Node, visited: &mut HashSet<Key>) -> Result<(), Solution> {
     #[cfg(test)]
     {
         println!("[dfs_helper] BEGIN w/\n{robot},\n{node:?},\n& {visited:?}\n")
@@ -108,7 +110,7 @@ fn dfs_helper(robot: &Robot, node: Node, visited: &mut HashSet<Key>) -> Result<(
                     }
                 }
                 // propagate errors
-                _ => { 
+                _ => {
                     #[cfg(test)]
                     {
                         println!("[dfs_helper] Error encountered! propagating upward...")

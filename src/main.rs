@@ -1,7 +1,10 @@
 use std::fs::read_to_string;
 
 use clap::Parser;
-use maze_robot::solve;
+
+mod solution;
+mod text_maze;
+use crate::solution::solve;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
