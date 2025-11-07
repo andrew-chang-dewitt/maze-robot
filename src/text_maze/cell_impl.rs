@@ -1,4 +1,4 @@
-use maze_robot::Cell;
+use maze_robot::controller::Cell;
 
 #[derive(Debug)]
 pub struct TextCell(Cell);

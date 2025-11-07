@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use maze_robot::{Cell, Direction, Maze, MazeError};
+use maze_robot::controller::{Cell, Direction, Maze, MazeError};
 
 use crate::text_maze::TextCell;
 

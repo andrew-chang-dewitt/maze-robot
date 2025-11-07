@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use maze_robot::{MazeError, Robot, RobotInternal};
+use maze_robot::controller::{MazeError, Robot, RobotInternal};
 
 use crate::text_maze::TextMaze;
 
@@ -31,7 +31,7 @@ impl Display for TextRobot {
 
 #[cfg(test)]
 mod tests {
-    use maze_robot::{Cell, Direction};
+    use maze_robot::controller::{Cell, Direction};
     use rstest::rstest;
 
     use super::*;

@@ -2,7 +2,7 @@ use std::{collections::HashSet, fmt::Display};
 
 use anyhow::anyhow;
 
-use maze_robot::{Cell, DIR_ARR, Direction, MazeError, Robot};
+use maze_robot::controller::{Cell, DIR_ARR, Direction, MazeError, Robot};
 
 use crate::text_maze::TextRobot;
 
