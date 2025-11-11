@@ -25,124 +25,23 @@ pub fn tokenize(text: &str) -> TokenIter {
     TokenIter::from(text)
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Token {
     /// Integers
     Int(isize),
     /// Binary operators
-    Op(Op),
+    EqOp,
+    GteOp,
+    LteOp,
+    GtOp,
+    LtOp,
+    PlusOp,
+    MinusOp,
+    MultOp,
+    DivOp,
     /// Parenthises
-    Paren(Paren),
-}
-
-impl PartialEq for Token {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Int(s), Self::Int(o)) => s == o,
-            (Self::Op(s), Self::Op(o)) => s == o,
-            (Self::Paren(s), Self::Paren(o)) => s == o,
-            _ => false,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-enum Op {
-    Eq,
-    Gte,
-    Lte,
-    Gt,
-    Lt,
-    Plus,
-    Minus,
-    Mult,
-    Div,
-}
-
-#[derive(Debug, PartialEq)]
-enum Paren {
-    Open,
-    Closed,
-}
-
-impl From<(usize, &str)> for Token {
-    fn from((idx, val): (usize, &str)) -> Self {
-        match idx {
-            // Int matcher
-            0 => Self::Int(val.parse().expect("{val} should match isize at this point")),
-            // Ops
-            1 => Self::Op(Op::Eq),
-            2 => Self::Op(Op::Gte),
-            3 => Self::Op(Op::Lte),
-            4 => Self::Op(Op::Gt),
-            5 => Self::Op(Op::Lt),
-            6 => Self::Op(Op::Plus),
-            7 => Self::Op(Op::Minus),
-            8 => Self::Op(Op::Mult),
-            9 => Self::Op(Op::Div),
-            10 => Self::Paren(Paren::Open),
-            11 => Self::Paren(Paren::Closed),
-            _ => panic!("this should never happen"),
-        }
-    }
-}
-
-static MATCHERS: LazyLock<[Regex; 12]> = LazyLock::new(|| {
-    [
-        // 0: Int matcher
-        Regex::new(r"^\s*(-?[0-9]+)").expect("hardcoded int regex should compile."),
-        // Op matchers
-        // 1: eq
-        Regex::new(r"^\s*(==)").expect("hardcoded int regex should compile."),
-        // 2: gte
-        Regex::new(r"^\s*(>=)").expect("hardcoded int regex should compile."),
-        // 3: lte
-        Regex::new(r"^\s*(<=)").expect("hardcoded int regex should compile."),
-        // 4: gt
-        Regex::new(r"^\s*(>)").expect("hardcoded int regex should compile."),
-        // 5: lt
-        Regex::new(r"^\s*(<)").expect("hardcoded int regex should compile."),
-        // 6: plus
-        Regex::new(r"^\s*(\+)").expect("hardcoded int regex should compile."),
-        // 7: minus
-        Regex::new(r"^\s*(-)").expect("hardcoded int regex should compile."),
-        // 8: mult
-        Regex::new(r"^\s*(\*)").expect("hardcoded int regex should compile."),
-        // 9: div
-        Regex::new(r"^\s*(/)").expect("hardcoded int regex should compile."),
-        // Paren matchers
-        // 10: open paren
-        Regex::new(r"^\s*(\()").expect("hardcoded int regex should compile."),
-        // 11: closed paren
-        Regex::new(r"^\s*(\))").expect("hardcoded int regex should compile."),
-    ]
-});
-
-fn take_from<'a>(text: &str, matchers: impl Iterator<Item = &'a Regex>) -> Option<(Token, usize)> {
-    matchers.enumerate().find_map(|(idx, re)| {
-        #[cfg(test)]
-        {
-            println!("[tokenizer::take_from] searching '{text}' using matcher {idx}: {re:?}");
-        }
-        re.captures(text).and_then(|caps| {
-            #[cfg(test)]
-            {
-                println!("[tokenizer::take_from] found capture groups {caps:?}");
-            }
-            let num_chars_used = caps
-                .get(0)
-                .expect("0th capture group always exists")
-                .as_str()
-                .chars()
-                .count();
-            let first = caps
-                .get(1)
-                .expect("1st capture group always exists")
-                .as_str();
-
-            Some((Token::from((idx, first)), num_chars_used))
-        })
-    })
+    OParen,
+    CParen,
 }
 
 pub struct TokenIter<'a> {
@@ -226,17 +125,17 @@ mod tests {
     #[case::simple_pos("1", vec![Token::Int(1)])]
     #[case::mult_pos("123456879", vec![Token::Int(123456879)])]
     #[case::simple_neg("-1", vec![Token::Int(-1)])]
-    #[case::simple_eq("==", vec![Token::Op(Op::Eq)])]
-    #[case::simple_gte(">=", vec![Token::Op(Op::Gte)])]
-    #[case::simple_lte("<=", vec![Token::Op(Op::Lte)])]
-    #[case::simple_gte(">", vec![Token::Op(Op::Gt)])]
-    #[case::simple_lte("<", vec![Token::Op(Op::Lt)])]
-    #[case::simple_lte("+", vec![Token::Op(Op::Plus)])]
-    #[case::simple_lte("-", vec![Token::Op(Op::Minus)])]
-    #[case::simple_lte("*", vec![Token::Op(Op::Mult)])]
-    #[case::simple_lte("/", vec![Token::Op(Op::Div)])]
-    #[case::simple_lte("(", vec![Token::Paren(Paren::Open)])]
-    #[case::simple_lte(")", vec![Token::Paren(Paren::Closed)])]
+    #[case::simple_eq("==", vec![Token::EqOp])]
+    #[case::simple_gte(">=", vec![Token::GteOp])]
+    #[case::simple_lte("<=", vec![Token::LteOp])]
+    #[case::simple_gte(">", vec![Token::GtOp])]
+    #[case::simple_lte("<", vec![Token::LtOp])]
+    #[case::simple_lte("+", vec![Token::PlusOp])]
+    #[case::simple_lte("-", vec![Token::MinusOp])]
+    #[case::simple_lte("*", vec![Token::MultOp])]
+    #[case::simple_lte("/", vec![Token::DivOp])]
+    #[case::simple_lte("(", vec![Token::OParen])]
+    #[case::simple_lte(")", vec![Token::CParen])]
     #[case::one_lead_space(" 1", vec![Token::Int(1)])]
     #[case::mult_lead_space("    1", vec![Token::Int(1)])]
     fn tokenize_one(#[case] text: &str, #[case] exp: Vec<Token>) {
@@ -253,17 +152,17 @@ mod tests {
         let input = "25 == ( 10 * 20 - 100) / 4 > 20";
         let exp = vec![
             Token::Int(25),
-            Token::Op(Op::Eq),
-            Token::Paren(Paren::Open),
+            Token::EqOp,
+            Token::OParen,
             Token::Int(10),
-            Token::Op(Op::Mult),
+            Token::MultOp,
             Token::Int(20),
-            Token::Op(Op::Minus),
+            Token::MinusOp,
             Token::Int(100),
-            Token::Paren(Paren::Closed),
-            Token::Op(Op::Div),
+            Token::CParen,
+            Token::DivOp,
             Token::Int(4),
-            Token::Op(Op::Gt),
+            Token::GtOp,
             Token::Int(20),
         ];
 
