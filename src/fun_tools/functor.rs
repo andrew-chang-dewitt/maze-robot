@@ -1,54 +1,42 @@
 pub trait Functor<A> {
-    type HigherSelf<T>: Functor<T>;
+    type FHigherSelf<T>: Functor<T>;
 
-    fn map<B>(self, f: impl Fn(A) -> B) -> Self::HigherSelf<B>;
+    fn fmap<B>(self, f: impl Fn(A) -> B) -> Self::FHigherSelf<B>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    impl<A> Functor<A> for Option<A> {
+        type FHigherSelf<T> = Option<T>;
+
+        fn fmap<B>(self, f: impl Fn(A) -> B) -> Self::FHigherSelf<B> {
+            self.map(f)
+        }
+    }
+
     #[test]
     fn maps_single_content_using_fn() {
-        #[derive(Debug, PartialEq, Eq)]
-        struct Thing<T>(T);
-
-        impl<A> Functor<A> for Thing<A> {
-            type HigherSelf<T> = Thing<T>;
-
-            fn map<B>(self, f: impl Fn(A) -> B) -> Self::HigherSelf<B> {
-                Thing(f(self.0))
-            }
-        }
-
-        let a = Thing(1);
+        let a = Some(1);
         let b = a.map(|x| format!("{x}"));
 
-        assert_eq!(b, Thing("1".to_string()))
+        assert_eq!(b, Some("1".to_string()))
+    }
+
+    impl<A> Functor<A> for Vec<A> {
+        type FHigherSelf<T> = Vec<T>;
+
+        fn fmap<B>(self, f: impl Fn(A) -> B) -> Self::FHigherSelf<B> {
+            self.into_iter().map(f).collect()
+        }
     }
 
     #[test]
     fn maps_listlike_contents_using_fn() {
-        struct List<T>(Vec<T>);
+        let a = vec![1, 2, 3, 4, 5];
+        let b = a.fmap(|x| format!("{x}"));
 
-        impl<T> List<T> {
-            pub fn new(vec: Vec<T>) -> Self {
-                Self(vec)
-            }
-        }
-
-        impl<A> Functor<A> for List<A> {
-            type HigherSelf<T> = List<T>;
-
-            fn map<B>(self, f: impl Fn(A) -> B) -> Self::HigherSelf<B> {
-                List(self.0.into_iter().map(f).collect())
-            }
-        }
-
-        let a = List::new(vec![1, 2, 3, 4, 5]);
-        let b = a.map(|x| format!("{x}"));
-
-        let act: Vec<String> = b.0;
         let exp = vec![
             String::from("1"),
             String::from("2"),
@@ -57,6 +45,6 @@ mod tests {
             String::from("5"),
         ];
 
-        assert_eq!(act, exp)
+        assert_eq!(b, exp)
     }
 }
