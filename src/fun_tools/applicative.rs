@@ -4,9 +4,8 @@ pub fn pure<'a, T: 'a, A: Applicative<'a, T>>(val: T) -> A {
     <A as Applicative<'a, T>>::pure(val)
 }
 
-pub trait Applicative<'a, A>: Functor<A>
+pub trait Applicative<'a, A: 'a>: Functor<A>
 where
-    A: 'a,
     Self: 'a,
 {
     type AHigherSelf<T: 'a>: Applicative<'a, T>;
@@ -18,9 +17,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
 
-    impl<'a, A> Applicative<'a, A> for Option<A>
+    impl<'a, A: 'a> Applicative<'a, A> for Option<A>
     where
         Self: 'a,
     {
@@ -35,7 +36,7 @@ mod tests {
             fs: Self::AHigherSelf<F>,
         ) -> Self::AHigherSelf<B> {
             match (self, fs) {
-                (Some(x), Some(f)) => Some(f(x)),
+                (Some(x), Some(f)) => Some(f(&x)),
                 _ => None,
             }
         }
@@ -50,7 +51,7 @@ mod tests {
         assert_eq!(b, Some(String::from("5")))
     }
 
-    impl<'a, A> Applicative<'a, A> for Vec<A>
+    impl<'a, A: 'a> Applicative<'a, A> for Vec<A>
     where
         Self: 'a,
     {
@@ -65,7 +66,9 @@ mod tests {
             &'a self,
             fs: Self::AHigherSelf<F>,
         ) -> Self::AHigherSelf<B> {
-            self.iter().flat_map(|x| fs.iter().map(|f| f(x))).collect()
+            self.into_iter()
+                .flat_map(|x| fs.iter().map(|f| f(x)))
+                .collect()
         }
     }
 
@@ -88,5 +91,59 @@ mod tests {
                 String::from("hello!")
             ]
         )
+    }
+
+    proptest! {
+        // ## Applicative laws
+        //
+        // 1. Identity:
+        //      pure id <*> v = v
+        #[test]
+        fn identity_law(i in isize::MIN..isize::MAX) {
+            let a = Some(i);
+            let b = None;
+            let id = |x| x;
+
+            prop_assert_eq!(a.apply(pure(id)), Some(&i));
+            prop_assert_eq!(b.apply(pure(id)), None);
+        }
+
+        // 2. Homomorphism:
+        //      pure f <*> pure x = pure (f x)
+        #[test]
+        fn homomorphism_law(i in (isize::MIN / 2)..(isize::MAX / 2)) {
+            let i1 = i;
+            let s1 = Some(i1);
+            let i2 = i;
+            let f = |x| x*2;
+
+            let left = s1.apply(pure(f));
+            let right = pure(f(&i2));
+            prop_assert_eq!(left,right);
+        }
+
+        // 3. Interchange:
+        //      u <*> pure x = pure ($ x) <*> u
+        // #[test]
+        // fn interchange_law(i in isize::MIN..isize::MAX) {
+        //     let a = Some(i);
+        //     let b = None;
+        //     let id = |x| x;
+
+        //     prop_assert_eq!(a.apply(pure(id)), Some(&i));
+        //     prop_assert_eq!(b.apply(pure(id)), None);
+        // }
+
+        // 4. Composition:
+        //      pure (.) <*> u <*> v <*> w = u <*> (v <*> w)
+        // #[test]
+        // fn composition_law(i in isize::MIN..isize::MAX) {
+        //     let a = Some(i);
+        //     let b = None;
+        //     let id = |x| x;
+
+        //     prop_assert_eq!(a.apply(pure(id)), Some(&i));
+        //     prop_assert_eq!(b.apply(pure(id)), None);
+        // }
     }
 }

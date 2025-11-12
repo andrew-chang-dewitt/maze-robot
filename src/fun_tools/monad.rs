@@ -1,10 +1,6 @@
 use super::Applicative;
 
-pub trait Monad<'a, A>: Applicative<'a, A>
-where
-    A: 'a,
-    Self: 'a,
-{
+pub trait Monad<'a, A: 'a>: Applicative<'a, A> {
     type MHigherType<T: 'a>: Monad<'a, T>;
 
     fn bind<B, F: Fn(A) -> Self::MHigherType<B>>(self, f: F) -> Self::MHigherType<B>;

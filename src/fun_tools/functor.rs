@@ -7,6 +7,7 @@ pub trait Functor<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     impl<A> Functor<A> for Option<A> {
         type FHigherSelf<T> = Option<T>;
@@ -46,5 +47,57 @@ mod tests {
         ];
 
         assert_eq!(b, exp)
+    }
+
+    proptest! {
+        // given:
+        //   id :: a -> a
+        //   id x = x
+        // then:
+        //   fmap id = id
+        #[test]
+        fn identity_law(i in isize::MIN..isize::MAX) {
+            let a = Some(i);
+            let b = None;
+            let id = |x| x;
+
+            prop_assert_eq!(a.fmap(id), Some(i));
+            prop_assert_eq!(b.fmap(id), None);
+        }
+
+        // given:
+        //   compose :: (a -> b) -> (b -> c) -> (a -> c)
+        //   compose f g = \x -> g $ f x
+        // then:
+        //   fmap $ compose f g = compose (fmap f) (fmap g)
+        //
+        // testing w/
+        //   f x = x * l,
+        //   g y = y / 2,
+        // s.t.
+        //   compose f g = \x -> x * l / 2
+        // where
+        //   x * l <= MAX -> x <= MAX / l
+        //   thus x < MAX / 100 -> l <= MAX / (MAX / 100) = 100
+        // #[test]
+        // fn composition_law(
+        //     l in 1isize..100,
+        //     i in (isize::MIN / 100)..(isize::MAX / 100),
+        // ) {
+        //     let a = Some(i);
+        //     let f = |x| x * l;
+        //     let g = |y| y / 2;
+
+        //     fn compose<'a,T,U,V,P,Q>(p: P, q: Q ) -> impl Fn(T) -> V
+        //     where
+        //         P: 'a + Fn(T) -> U,
+        //         Q: 'a + Fn(U) -> V,
+        //     {
+        //         move |z| q(p(z))
+        //     };
+
+        //     // TODO: how to actually compose to fmaps?
+        //     prop_assert_eq!(a.fmap(compose(f,g)), Some(compose(f,g)(i) ))
+        // }
     }
 }
