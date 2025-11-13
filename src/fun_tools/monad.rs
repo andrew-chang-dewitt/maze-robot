@@ -1,21 +1,29 @@
-use super::Applicative;
+use super::Functor;
 
-pub fn ret<'a, T: 'a, M: Monad<'a, T>>(val: T) -> M {
-    <M as Monad<'a, T>>::ret(val)
+pub fn ret<T, M: Monad<T>>(val: T) -> M {
+    <M as Monad<T>>::ret(val)
 }
 
-pub trait Monad<'a, A: 'a>: Applicative<'a, A> {
-    type MHigherType<T: 'a>: Monad<'a, T>;
+pub trait Monad<A>: Functor<A> {
+    type MHigherType<T>: Monad<T>;
 
     fn bind<B, F: Fn(A) -> Self::MHigherType<B>>(self, f: F) -> Self::MHigherType<B>;
 
     fn seq<B>(self, next: Self::MHigherType<B>) -> Self::MHigherType<B>;
 
-    fn ret(val: A) -> Self
-    where
-        Self: Sized,
-    {
-        Self::pure(val)
+    fn ret(val: A) -> Self;
+}
+
+/// A type that transforms a given Monad of A into itself, granting that Monad all the
+/// functionality of itself. A Monad Transformer is itself required to be a Monad (of the
+/// given Monad).
+pub trait MonadTrans<A, M>: Monad<M>
+where
+    M: Monad<A> + Into<Self>,
+    Self: Sized + Monad<M>,
+{
+    fn lift(m: M) -> Self {
+        m.into()
     }
 }
 
@@ -26,19 +34,19 @@ mod tests {
 
     use super::*;
 
-    impl<'a, A> Monad<'a, A> for Option<A>
-    where
-        A: 'a,
-        Self: 'a,
-    {
-        type MHigherType<T: 'a> = Option<T>;
+    impl<A> Monad<A> for Option<A> {
+        type MHigherType<T> = Option<T>;
 
-        fn bind<B: 'a, F: Fn(A) -> Self::MHigherType<B>>(self, f: F) -> Self::MHigherType<B> {
+        fn bind<B, F: Fn(A) -> Self::MHigherType<B>>(self, f: F) -> Self::MHigherType<B> {
             self.and_then(f)
         }
 
-        fn seq<B: 'a>(self, next: Self::MHigherType<B>) -> Self::MHigherType<B> {
+        fn seq<B>(self, next: Self::MHigherType<B>) -> Self::MHigherType<B> {
             self.and(next)
+        }
+
+        fn ret(val: A) -> Self {
+            Some(val)
         }
     }
 

@@ -15,14 +15,14 @@
 use std::{
     error::Error,
     fmt::{Debug, Display},
+    marker::PhantomData,
+    str::Chars,
 };
 
 use crate::fun_tools::{Applicative, Functor, Monad};
 
-type TokenResult = Result<Token, TokenErr>;
-
 /// Convert a given source text into an iterator of `Token`s, ready to be parsed.
-pub fn tokenize(text: &str) -> impl Iterator<Item = TokenResult> {
+pub fn tokenize(text: &str) -> impl Iterator<Item = std::result::Result<Token, TokenErr>> {
     vec![].into_iter()
 }
 
@@ -45,42 +45,37 @@ pub enum Token {
     CParen,
 }
 
-struct Parser<T>(String);
+type Result<T> = std::result::Result<T, TokenErr>;
 
-trait State<'a, S, A> {
-    type Output: Monad<'a, (S, A)>
-    where
-        S: 'a,
-        A: 'a;
+impl<T> Functor<T> for Result<T> {
+    type FHigherSelf<S> = Result<S>;
 
-    fn run_state(state: S) -> Self::Output;
+    fn fmap<B>(self, f: impl Fn(T) -> B) -> Self::FHigherSelf<B> {
+        self.map(f)
+    }
 }
 
-impl<'a, T> State<'a, String, T> for Parser<T> {
-    type Output
-        = Result<Option<(String, T)>, TokenErr>
-    where
-        String: 'a,
-        T: 'a;
-}
-
-impl<'a, T: 'a, E: 'a> Applicative<'a, T> for Result<T, E> {
-    type AHigherSelf<S: 'a> = Result<S, E>;
+impl<'a, T: 'a> Applicative<'a, T> for Result<T> {
+    type AHigherSelf<S: 'a> = Result<S>;
 
     fn pure(val: T) -> Self {
         Ok(val)
     }
 
-    fn apply<B, F: Fn(&'a T) -> B>(&'a self, fs: Self::AHigherSelf<F>) -> Self::AHigherSelf<B> {
-        match fs {
-            Ok(f) => self.map(f),
-            _ => self,
+    fn apply<B: 'a, F: 'a + Fn(&'a T) -> B>(
+        &'a self,
+        fs: Self::AHigherSelf<F>,
+    ) -> Self::AHigherSelf<B> {
+        match (self, fs) {
+            (Ok(t), Ok(f)) => Ok(f(&t)),
+            (Ok(_), Err(e)) => Err(e),
+            (Err(e), _) => Err(*e),
         }
     }
 }
 
-impl<'a, T: 'a, E: 'a> Monad<'a, T> for Result<T, E> {
-    type MHigherType<S: 'a> = Result<S, E>;
+impl<T> Monad<T> for Result<T> {
+    type MHigherType<S> = Result<S>;
 
     fn ret(val: T) -> Self
     where
@@ -89,11 +84,11 @@ impl<'a, T: 'a, E: 'a> Monad<'a, T> for Result<T, E> {
         Ok(val)
     }
 
-    fn bind<B: 'a, F: Fn(T) -> Self::MHigherType<B>>(self, f: F) -> Self::MHigherType<B> {
+    fn bind<B, F: Fn(T) -> Self::MHigherType<B>>(self, f: F) -> Self::MHigherType<B> {
         self.and_then(f)
     }
 
-    fn seq<B: 'a>(self, next: Self::MHigherType<B>) -> Self::MHigherType<B> {
+    fn seq<B>(self, next: Self::MHigherType<B>) -> Self::MHigherType<B> {
         self.and(next)
     }
 }
@@ -153,7 +148,7 @@ impl<'a, T: 'a, E: 'a> Monad<'a, T> for Result<T, E> {
 //     }
 // }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum TokenErr {
     Invalid(usize),
 }
@@ -193,7 +188,7 @@ mod tests {
     // #[case::one_lead_space(" 1", vec![Token::Int(1)])]
     // #[case::mult_lead_space("    1", vec![Token::Int(1)])]
     fn tokenize_one(#[case] text: &str, #[case] exp: Vec<Token>) {
-        let tokens: Result<Vec<Token>, TokenErr> = tokenize(text).collect();
+        let tokens: Result<Vec<Token>> = tokenize(text).collect();
         let err_msg =
             format!("input '{text}' should tokenize successfully, instead got {tokens:?}");
         let act = tokens.expect(&err_msg);
