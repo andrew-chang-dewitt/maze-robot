@@ -12,12 +12,16 @@ where
 
     fn pure(val: A) -> Self;
 
+    // requires borrowing of A & self if we want to be able to impl apply as a cartesian product
+    // of the contents in two Applicatives, as is typical in Haskell
     fn apply<B, F: Fn(&'a A) -> B>(&'a self, fs: Self::AHigherSelf<F>) -> Self::AHigherSelf<B>;
 }
 
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
+
+    use crate::fun_tools::apply;
 
     use super::*;
 
@@ -112,6 +116,8 @@ mod tests {
         //      pure f <*> pure x = pure (f x)
         #[test]
         fn homomorphism_law(i in (isize::MIN / 2)..(isize::MAX / 2)) {
+            // duplicate values here to avoid issues w/ borrow after drop
+            // when creating left & right sides of assertion
             let i1 = i;
             let s1 = Some(i1);
             let i2 = i;
@@ -124,26 +130,25 @@ mod tests {
 
         // 3. Interchange:
         //      u <*> pure x = pure ($ x) <*> u
-        // #[test]
-        // fn interchange_law(i in isize::MIN..isize::MAX) {
-        //     let a = Some(i);
-        //     let b = None;
-        //     let id = |x| x;
+        //    or, in english:
+        //      some functor, u, applied to a functor containing x is equivalent to
+        //      a functor containing a function taking some functor that can be called with that
+        //      function
+        #[test]
+        fn interchange_law(i in (isize::MIN / 2)..(isize::MAX / 2)) {
+            // duplicate values here to avoid issues w/ borrow after drop
+            // when creating left & right sides of assertion
+            let u1 = Some(|x| x*2);
+            let u2 = Some(|x| x*2);
 
-        //     prop_assert_eq!(a.apply(pure(id)), Some(&i));
-        //     prop_assert_eq!(b.apply(pure(id)), None);
-        // }
+            let left = pure::<isize,Option<isize>>(i).apply(u1);
+            let right = u2.apply(pure(apply(&i)));
+            prop_assert_eq!(left,right);
+        }
 
         // 4. Composition:
         //      pure (.) <*> u <*> v <*> w = u <*> (v <*> w)
-        // #[test]
-        // fn composition_law(i in isize::MIN..isize::MAX) {
-        //     let a = Some(i);
-        //     let b = None;
-        //     let id = |x| x;
-
-        //     prop_assert_eq!(a.apply(pure(id)), Some(&i));
-        //     prop_assert_eq!(b.apply(pure(id)), None);
-        // }
+        //  this haskell example uses partial application & currying of functions; rust can't ever
+        //  effectively implement this in a natural way
     }
 }

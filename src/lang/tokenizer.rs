@@ -17,6 +17,8 @@ use std::{
     fmt::{Debug, Display},
 };
 
+use crate::fun_tools::{Applicative, Functor, Monad};
+
 type TokenResult = Result<Token, TokenErr>;
 
 /// Convert a given source text into an iterator of `Token`s, ready to be parsed.
@@ -41,6 +43,59 @@ pub enum Token {
     /// Parenthises
     OParen,
     CParen,
+}
+
+struct Parser<T>(String);
+
+trait State<'a, S, A> {
+    type Output: Monad<'a, (S, A)>
+    where
+        S: 'a,
+        A: 'a;
+
+    fn run_state(state: S) -> Self::Output;
+}
+
+impl<'a, T> State<'a, String, T> for Parser<T> {
+    type Output
+        = Result<Option<(String, T)>, TokenErr>
+    where
+        String: 'a,
+        T: 'a;
+}
+
+impl<'a, T: 'a, E: 'a> Applicative<'a, T> for Result<T, E> {
+    type AHigherSelf<S: 'a> = Result<S, E>;
+
+    fn pure(val: T) -> Self {
+        Ok(val)
+    }
+
+    fn apply<B, F: Fn(&'a T) -> B>(&'a self, fs: Self::AHigherSelf<F>) -> Self::AHigherSelf<B> {
+        match fs {
+            Ok(f) => self.map(f),
+            _ => self,
+        }
+    }
+}
+
+impl<'a, T: 'a, E: 'a> Monad<'a, T> for Result<T, E> {
+    type MHigherType<S: 'a> = Result<S, E>;
+
+    fn ret(val: T) -> Self
+    where
+        Self: Sized,
+    {
+        Ok(val)
+    }
+
+    fn bind<B: 'a, F: Fn(T) -> Self::MHigherType<B>>(self, f: F) -> Self::MHigherType<B> {
+        self.and_then(f)
+    }
+
+    fn seq<B: 'a>(self, next: Self::MHigherType<B>) -> Self::MHigherType<B> {
+        self.and(next)
+    }
 }
 
 // pub struct TokenIter<'a> {

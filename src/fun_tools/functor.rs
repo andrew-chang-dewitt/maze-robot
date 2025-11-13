@@ -6,6 +6,8 @@ pub trait Functor<A> {
 
 #[cfg(test)]
 mod tests {
+    use crate::fun_tools::compose;
+
     use super::*;
     use proptest::prelude::*;
 
@@ -70,6 +72,10 @@ mod tests {
         //   compose f g = \x -> g $ f x
         // then:
         //   fmap $ compose f g = compose (fmap f) (fmap g)
+        // or, since rust doesn't have partial application of functions,
+        // we can manually compose the mapping of f & g onto a as
+        // f mapped onto a, then g mapped onto the result
+        //   a.fmap(compose(f,g)) = a.fmap(f).fmap(g)
         //
         // testing w/
         //   f x = x * l,
@@ -79,25 +85,17 @@ mod tests {
         // where
         //   x * l <= MAX -> x <= MAX / l
         //   thus x < MAX / 100 -> l <= MAX / (MAX / 100) = 100
-        // #[test]
-        // fn composition_law(
-        //     l in 1isize..100,
-        //     i in (isize::MIN / 100)..(isize::MAX / 100),
-        // ) {
-        //     let a = Some(i);
-        //     let f = |x| x * l;
-        //     let g = |y| y / 2;
+        #[test]
+        fn composition_law(
+            l in 1isize..100,
+            i in (isize::MIN / 100)..(isize::MAX / 100),
+        ) {
+            let i1 = Some(i);
+            let i2 = Some(i);
+            let f = |x| x * l;
+            let g = |y| y / 2;
 
-        //     fn compose<'a,T,U,V,P,Q>(p: P, q: Q ) -> impl Fn(T) -> V
-        //     where
-        //         P: 'a + Fn(T) -> U,
-        //         Q: 'a + Fn(U) -> V,
-        //     {
-        //         move |z| q(p(z))
-        //     };
-
-        //     // TODO: how to actually compose to fmaps?
-        //     prop_assert_eq!(a.fmap(compose(f,g)), Some(compose(f,g)(i) ))
-        // }
+            prop_assert_eq!(i1.fmap(compose(f,g)), i2.fmap(f).fmap(g))
+        }
     }
 }
