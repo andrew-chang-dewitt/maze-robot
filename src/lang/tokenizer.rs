@@ -15,18 +15,18 @@
 use std::{
     error::Error,
     fmt::{Debug, Display},
-    marker::PhantomData,
-    str::Chars,
+    // marker::PhantomData,
+    // str::Chars,
 };
 
 use crate::fun_tools::{
     Functor,
+    Monad,
     // Applicative,
-    // Monad
 };
 
 /// Convert a given source text into an iterator of `Token`s, ready to be parsed.
-pub fn tokenize(text: &str) -> impl Iterator<Item = std::result::Result<Token, TokenErr>> {
+pub fn tokenize(_text: &str) -> impl Iterator<Item = std::result::Result<Token, TokenErr>> {
     vec![].into_iter()
 }
 
@@ -78,25 +78,23 @@ impl<T> Functor for Result<T> {
 //         }
 //     }
 // }
-//
-// impl<T> Monad<T> for Result<T> {
-//     type MHigherType<S> = Result<S>;
-//
-//     fn ret(val: T) -> Self
-//     where
-//         Self: Sized,
-//     {
-//         Ok(val)
-//     }
-//
-//     fn bind<B, F: Fn(T) -> Self::MHigherType<B>>(self, f: F) -> Self::MHigherType<B> {
-//         self.and_then(f)
-//     }
-//
-//     fn seq<B>(self, next: Self::MHigherType<B>) -> Self::MHigherType<B> {
-//         self.and(next)
-//     }
-// }
+
+impl<T> Monad for Result<T> {
+    fn ret(val: T) -> Self
+    where
+        Self: Sized,
+    {
+        Ok(val)
+    }
+
+    fn bind<B, F: FnMut(Self::Unwrapped) -> Self::Wrapped<B>>(self, f: F) -> Self::Wrapped<B> {
+        self.and_then(f)
+    }
+
+    fn seq<B>(self, next: Self::Wrapped<B>) -> Self::Wrapped<B> {
+        self.and(next)
+    }
+}
 
 // pub struct TokenIter<'a> {
 //     src: &'a str,
