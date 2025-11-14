@@ -19,7 +19,11 @@ use std::{
     str::Chars,
 };
 
-use crate::fun_tools::{Applicative, Functor, Monad};
+use crate::fun_tools::{
+    Functor,
+    // Applicative,
+    // Monad
+};
 
 /// Convert a given source text into an iterator of `Token`s, ready to be parsed.
 pub fn tokenize(text: &str) -> impl Iterator<Item = std::result::Result<Token, TokenErr>> {
@@ -47,51 +51,52 @@ pub enum Token {
 
 type Result<T> = std::result::Result<T, TokenErr>;
 
-impl<T> Functor<T> for Result<T> {
-    type FHigherSelf<S> = Result<S>;
+impl<T> Functor for Result<T> {
+    type Unwrapped = T;
+    type Wrapped<S> = Result<S>;
 
-    fn fmap<B>(self, f: impl Fn(T) -> B) -> Self::FHigherSelf<B> {
+    fn fmap<B>(self, f: impl FnMut(Self::Unwrapped) -> B) -> Self::Wrapped<B> {
         self.map(f)
     }
 }
 
-impl<'a, T: 'a> Applicative<'a, T> for Result<T> {
-    type AHigherSelf<S: 'a> = Result<S>;
-
-    fn pure(val: T) -> Self {
-        Ok(val)
-    }
-
-    fn apply<B: 'a, F: 'a + Fn(&'a T) -> B>(
-        &'a self,
-        fs: Self::AHigherSelf<F>,
-    ) -> Self::AHigherSelf<B> {
-        match (self, fs) {
-            (Ok(t), Ok(f)) => Ok(f(&t)),
-            (Ok(_), Err(e)) => Err(e),
-            (Err(e), _) => Err(*e),
-        }
-    }
-}
-
-impl<T> Monad<T> for Result<T> {
-    type MHigherType<S> = Result<S>;
-
-    fn ret(val: T) -> Self
-    where
-        Self: Sized,
-    {
-        Ok(val)
-    }
-
-    fn bind<B, F: Fn(T) -> Self::MHigherType<B>>(self, f: F) -> Self::MHigherType<B> {
-        self.and_then(f)
-    }
-
-    fn seq<B>(self, next: Self::MHigherType<B>) -> Self::MHigherType<B> {
-        self.and(next)
-    }
-}
+// impl<'a, T: 'a> Applicative<'a, T> for Result<T> {
+//     type AHigherSelf<S: 'a> = Result<S>;
+//
+//     fn pure(val: T) -> Self {
+//         Ok(val)
+//     }
+//
+//     fn apply<B: 'a, F: 'a + Fn(&'a T) -> B>(
+//         &'a self,
+//         fs: Self::AHigherSelf<F>,
+//     ) -> Self::AHigherSelf<B> {
+//         match (self, fs) {
+//             (Ok(t), Ok(f)) => Ok(f(&t)),
+//             (Ok(_), Err(e)) => Err(e),
+//             (Err(e), _) => Err(*e),
+//         }
+//     }
+// }
+//
+// impl<T> Monad<T> for Result<T> {
+//     type MHigherType<S> = Result<S>;
+//
+//     fn ret(val: T) -> Self
+//     where
+//         Self: Sized,
+//     {
+//         Ok(val)
+//     }
+//
+//     fn bind<B, F: Fn(T) -> Self::MHigherType<B>>(self, f: F) -> Self::MHigherType<B> {
+//         self.and_then(f)
+//     }
+//
+//     fn seq<B>(self, next: Self::MHigherType<B>) -> Self::MHigherType<B> {
+//         self.and(next)
+//     }
+// }
 
 // pub struct TokenIter<'a> {
 //     src: &'a str,

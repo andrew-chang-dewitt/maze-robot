@@ -1,7 +1,8 @@
-pub trait Functor<A> {
-    type FHigherSelf<T>: Functor<T>;
+pub trait Functor {
+    type Unwrapped;
+    type Wrapped<T>: Functor;
 
-    fn fmap<B>(self, f: impl Fn(A) -> B) -> Self::FHigherSelf<B>;
+    fn fmap<B>(self, f: impl FnMut(Self::Unwrapped) -> B) -> Self::Wrapped<B>;
 }
 
 #[cfg(test)]
@@ -11,10 +12,11 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    impl<A> Functor<A> for Option<A> {
-        type FHigherSelf<T> = Option<T>;
+    impl<A> Functor for Option<A> {
+        type Unwrapped = A;
+        type Wrapped<T> = Option<T>;
 
-        fn fmap<B>(self, f: impl Fn(A) -> B) -> Self::FHigherSelf<B> {
+        fn fmap<B>(self, f: impl FnMut(Self::Unwrapped) -> B) -> Self::Wrapped<B> {
             self.map(f)
         }
     }
@@ -27,10 +29,11 @@ mod tests {
         assert_eq!(b, Some("1".to_string()))
     }
 
-    impl<A> Functor<A> for Vec<A> {
-        type FHigherSelf<T> = Vec<T>;
+    impl<A> Functor for Vec<A> {
+        type Unwrapped = A;
+        type Wrapped<T> = Vec<T>;
 
-        fn fmap<B>(self, f: impl Fn(A) -> B) -> Self::FHigherSelf<B> {
+        fn fmap<B>(self, f: impl FnMut(Self::Unwrapped) -> B) -> Self::Wrapped<B> {
             self.into_iter().map(f).collect()
         }
     }

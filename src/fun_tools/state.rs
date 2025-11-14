@@ -34,16 +34,16 @@ where
 impl<F, M, A, S, N, G> Functor<A> for State<F, M, A, S>
 where
     F: Fn(S) -> M,
-    M: Monad<(A, S)>,
+    M: Functor<(A, S)>,
 {
-    type FHigherSelf<B>
+    type Wrapped<B>
         = State<G, N, B, S>
     where
-        N: Monad<(B, S)>,
+        N: Functor<(B, S)>,
         G: Fn(S) -> N;
 
-    fn fmap<B>(self, f: impl Fn(A) -> B) -> Self::FHigherSelf<B> {
-        State::new(|s1| self.run(s1).bind(|(a, s2)| (f(a), s2)))
+    fn fmap<B>(self, f: impl Fn(A) -> B) -> Self::Wrapped<B> {
+        State::new(|s1| self.run(s1).fmap(|(a, s2)| (f(a), s2)))
     }
 }
 

@@ -1,12 +1,12 @@
-mod applicative;
+// mod applicative;
 mod functor;
-mod monad;
-mod state;
+// mod monad;
+// mod state;
 
-pub use applicative::Applicative;
+// pub use applicative::Applicative;
 pub use functor::Functor;
-pub use monad::{Monad, MonadTrans};
-pub use state::State;
+// pub use monad::{Monad, MonadTrans};
+// pub use state::State;
 
 pub fn compose<'a, T, U, V, P, Q>(p: P, q: Q) -> impl Fn(T) -> V
 where
