@@ -2,26 +2,64 @@ use std::str::FromStr;
 
 use crate::util::List;
 
-use super::ast::{Expr, Stmt};
+use super::ast::{Expr, Prog, Stmt};
 
 grammar;
 
+// TOKENS
+
+match {
+    // strings
+    r"[a-zA-Z][a-zA-Z0-9_`~!@#$%^&*\-+\\':;<>,.?/]*" => Str,
+    // numbers
+    r"[0-9][0-9_]*" => Num,
+    // commas
+    "," => Comma,
+    // bind
+    "=" => Eq,
+    // Parens
+    "(" => OParen,
+    ")" => CParen,
+    // Brackets
+    "[" => OBrkt,
+    "]" => CBrkt,
+    // empty rule to disable default empty rules on whitespace
+    "" => {},
+} else {
+    // rule to tokenize newlines
+    r"\n" => NewLine,
+    // rules to skip other whitespace
+    r" *" => {},
+    r"\t*" => {},
+    // // finally, use default rules for all other cases
+    // _,
+}
+
+
+// GRAMMAR
+
+pub Prog: Prog = <StmtList> => Prog::new(<>);
+
+StmtList: List<Stmt> = {
+    <s:Stmt> NewLine NewLine <l:StmtList> => List::cons(*s, l),
+    <Stmt> => List::one(*<>),
+};
+
 pub Stmt: Box<Stmt> = {
     // function statment
-    // TODO: how to make functions variadic?
-    <id:Sym> <args:ArgList> "=" <body:Expr> => Box::new(Stmt::new(id, args, body)),
-    <id:Sym> "=" <body:Expr> => Box::new(Stmt::new(id, List::empty(), body)),
-}
+    <id:Sym> <args:ArgList> Eq <body:Expr> => Box::new(Stmt::new(&id, args, *body)),
+    <id:Sym> Eq <body:Expr> => Box::new(Stmt::new(&id, List::empty(), *body)),
+};
 
 ArgList: List<String> = {
     <s:Sym> <l:ArgList> => List::cons(s, l),
     <Sym> => List::one(<>),
-}
+};
 
 pub Expr: Box<Expr> = {
     // list expression
-    "[" <ListMembs> "]" => Box::new(Expr::List(<>)),
-    "[" "]" => Box::new(Expr::List(List::empty())),
+    OBrkt <ListMembs> CBrkt => Box::new(Expr::List(<>)),
+    OBrkt CBrkt => Box::new(Expr::List(List::empty())),
 
     // function expression
     <Sym> <Expr> => Box::new(Expr::Fun(<>)),
@@ -33,24 +71,18 @@ pub Expr: Box<Expr> = {
     <Int> => Box::new(Expr::Num(<>)),
 
     // parenthetical expression
-    "(" <Expr> ")" => <>,
+    OParen <Expr> CParen => <>,
 };
 
 ListMembs: List<Box<Expr>> = {
-    <e:Expr> "," <l:ListMembs> => List::cons(e, l),
-    <Expr> "," => List::one(<>),
+    <e:Expr> Comma <l:ListMembs> => List::cons(e, l),
+    <Expr> Comma => List::one(<>),
     <Expr> => List::one(<>),
 }
 
-
-// TOKENS
-
 /// a symbol is an alphabetical char, followed by 0 or more alpha,
 /// numeric, or special chars
-Sym: String = r"[a-zA-Z][a-zA-Z0-9_`~!@#$%^&*\-+\\':;<>,.?/]*" => <>.to_string();
+Sym: String = Str => <>.to_string();
 
 /// an integer of at least one digit followed by 0 or more digits and 0 or more `_` separators
-Int: i32 = r"[0-9][0-9_]*" => i32::from_str(&<>.replace('_', "")).unwrap();
-// ^ shorthand for the following:
-//
-// Int: i32 = <s:r"[0-9_]+"> => i32::from_str(s).unwrap();
+Int: i32 = Num => i32::from_str(&<>.replace('_', "")).unwrap();

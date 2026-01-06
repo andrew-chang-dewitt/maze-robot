@@ -11,33 +11,46 @@ mod tests {
 
     use crate::util::List;
 
-    use super::ast::{Expr, Stmt};
-    use super::parser::{ExprParser, StmtParser};
+    use super::ast::{Expr, Prog, Stmt};
+    use super::parser::{ExprParser, ProgParser, StmtParser};
+
+    #[test]
+    fn prog() {
+        let input = "foo = 1\n\nbar x = x";
+        let expected = Prog::new(List::cons(
+            Stmt::new("foo", List::empty(), Expr::Num(1)),
+            List::one(Stmt::new(
+                "bar",
+                List::one("x".to_string()),
+                Expr::Ref("x".to_string()),
+            )),
+        ));
+        let actual = ProgParser::new()
+            .parse(input)
+            .expect("{input} should parse");
+
+        assert_eq!(actual, expected)
+    }
 
     #[rstest]
     #[case::single_arg(
         "foo x = 1",
-        "foo".to_string(),
+        "foo",
         List::one("x".to_string()),
-        Box::new(Expr::Num(1))
+        Expr::Num(1)
     )]
     #[case::many_arg(
         "foo x y = 1",
-        "foo".to_string(),
+        "foo",
         List::cons("x".to_string(), List::one("y".to_string())),
-        Box::new(Expr::Num(1))
+        Expr::Num(1)
     )]
-    #[case::zero_arg(
-        "foo = 1",
-        "foo".to_string(),
-        List::empty(),
-        Box::new(Expr::Num(1))
-    )]
+    #[case::zero_arg("foo = 1", "foo", List::empty(), Expr::Num(1))]
     fn fun_stmt(
         #[case] input: &str,
-        #[case] exp_id: String,
+        #[case] exp_id: &str,
         #[case] exp_args: List<String>,
-        #[case] exp_body: Box<Expr>,
+        #[case] exp_body: Expr,
     ) {
         let actual = StmtParser::new()
             .parse(input)
@@ -92,7 +105,7 @@ mod tests {
         //                 01234
         let input = "((22)";
         let expected_location = 5;
-        let expected_token = vec!["\")\"".to_string()];
+        let expected_token = vec!["CParen".to_string()];
         let actual = ExprParser::new().parse(input);
 
         match actual {

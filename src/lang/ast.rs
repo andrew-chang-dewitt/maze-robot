@@ -1,15 +1,28 @@
 use crate::util::List;
 
 #[derive(Debug, PartialEq)]
+pub struct Prog(List<Stmt>);
+
+impl Prog {
+    pub fn new(stmts: List<Stmt>) -> Self {
+        Self(stmts)
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Stmt {
     id: String,
     args: List<String>,
-    body: Box<Expr>,
+    body: Expr,
 }
 
 impl Stmt {
-    pub fn new(id: String, args: List<String>, body: Box<Expr>) -> Self {
-        Self { id, args, body }
+    pub fn new(id: &str, args: List<String>, body: Expr) -> Self {
+        Self {
+            id: id.to_string(),
+            args,
+            body,
+        }
     }
 }
 
