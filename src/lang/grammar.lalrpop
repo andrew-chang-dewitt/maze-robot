@@ -1,11 +1,11 @@
 // TODO:
 // - add location tracking! https://lalrpop.github.io/lalrpop/location_tracking.html
 
-use nostd::{boxed::Box, string::String, prelude::ToString};
+use nostd::{boxed::Box, prelude::ToString};
 
 use crate::ds::List;
 
-use super::ast::{Expr, Prog, Stmt};
+use super::ast::{Expr, Prog, Stmt, Sym as Symbol};
 
 grammar;
 
@@ -61,11 +61,11 @@ StmtList: List<Stmt> = {
 /// an expression of those arguments to a symbol.
 pub Stmt: Box<Stmt> = {
     // function statment
-    <id:Sym> <args:ArgList> Eq <body:Expr> => Box::new(Stmt::new(&id, args, *body)),
-    <id:Sym> Eq <body:Expr> => Box::new(Stmt::new(&id, List::empty(), *body)),
+    <id:Sym> <args:ArgList> Eq <body:Expr> => Box::new(Stmt::new(id, args, *body)),
+    <id:Sym> Eq <body:Expr> => Box::new(Stmt::new(id, List::empty(), *body)),
 };
 
-ArgList: List<String> = {
+ArgList: List<Symbol> = {
     <s:Sym> <l:ArgList> => List::cons(s, l),
     <Sym> => List::one(<>),
 };
@@ -98,7 +98,7 @@ ListMembs: List<Box<Expr>> = {
 
 /// a symbol is an alphabetical char, followed by 0 or more alpha,
 /// numeric, or special chars
-Sym: String = Str => <>.to_string();
+Sym: Symbol = Str => Symbol( <>.to_string() );
 
 /// an integer of at least one digit followed by 0 or more digits and 0 or more `_` separators
 Int: usize = Num => <>.replace('_', "").parse().unwrap();

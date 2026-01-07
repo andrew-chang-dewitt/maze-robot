@@ -7,23 +7,23 @@ lalrpop_mod!(pub parser, "/lang/grammar.rs");
 #[cfg(test)]
 mod tests {
     use lalrpop_util::ParseError;
-    use nostd::{boxed::Box, prelude::ToString, string::String, vec};
+    use nostd::{boxed::Box, prelude::ToString, vec};
     use rstest::rstest;
 
     use crate::ds::List;
 
-    use super::ast::{Expr, Prog, Stmt};
+    use super::ast::{Expr, Prog, Stmt, Sym};
     use super::parser::{ExprParser, ProgParser, StmtParser};
 
     #[test]
     fn prog() {
         let input = "foo = 1\n\nbar x = x";
         let expected = Prog::new(List::cons(
-            Stmt::new("foo", List::empty(), Expr::Num(1)),
+            Stmt::new(Sym::new("foo"), List::empty(), Expr::Num(1)),
             List::one(Stmt::new(
-                "bar",
-                List::one("x".to_string()),
-                Expr::Ref("x".to_string()),
+                Sym::new("bar"),
+                List::one(Sym::new("x")),
+                Expr::Ref(Sym::new("x")),
             )),
         ));
         let actual = ProgParser::new()
@@ -34,29 +34,24 @@ mod tests {
     }
 
     #[rstest]
-    #[case::single_arg(
-        "foo x = 1",
-        "foo",
-        List::one("x".to_string()),
-        Expr::Num(1)
-    )]
+    #[case::single_arg("foo x = 1", "foo", List::one(Sym::new("x")), Expr::Num(1))]
     #[case::many_arg(
         "foo x y = 1",
         "foo",
-        List::cons("x".to_string(), List::one("y".to_string())),
+        List::cons(Sym::new("x"), List::one(Sym::new("y"))),
         Expr::Num(1)
     )]
     #[case::zero_arg("foo = 1", "foo", List::empty(), Expr::Num(1))]
     fn fun_stmt(
         #[case] input: &str,
         #[case] exp_id: &str,
-        #[case] exp_args: List<String>,
+        #[case] exp_args: List<Sym>,
         #[case] exp_body: Expr,
     ) {
         let actual = StmtParser::new()
             .parse(input)
             .expect("{input} should parse");
-        let expected = Stmt::new(exp_id, exp_args, exp_body);
+        let expected = Stmt::new(Sym::new(exp_id), exp_args, exp_body);
 
         assert_eq!(actual, Box::new(expected))
     }
@@ -126,16 +121,20 @@ mod tests {
     #[rstest]
     #[case::int_arg("foo 1", "foo", Expr::Num(1))]
     #[case::expr_arg("foo (1)", "foo", Expr::Num(1))]
-    #[case::fn_arg("foo (bar 1)", "foo", Expr::Fun("bar".to_string(), Box::new(Expr::Num(1))))]
+    #[case::fn_arg(
+        "foo (bar 1)",
+        "foo",
+        Expr::Fun(Sym::new("bar"), Box::new(Expr::Num(1)))
+    )]
     // #[case::no_arg("foo", true)]
-    fn fn_expr(#[case] input: &str, #[case] exp_id: String, #[case] exp_body: Expr) {
+    fn fn_expr(#[case] input: &str, #[case] exp_id: &str, #[case] exp_body: Expr) {
         let actual = ExprParser::new()
             .parse(input)
             .expect("{input} should parse");
 
         match *actual {
             Expr::Fun(act_id, act_body) => {
-                assert_eq!((act_id, act_body), (exp_id, Box::new(exp_body)))
+                assert_eq!((act_id, act_body), (Sym::new(exp_id), Box::new(exp_body)))
             }
             _ => panic!("expected an `Expr::Fun`, but got {actual:?}"),
         }
@@ -144,7 +143,10 @@ mod tests {
     #[rstest]
     #[case::empty("[]", Expr::List(List::empty()))]
     #[case::one_int("[1]", Expr::List(List::one(Box::new(Expr::Num(1)))))]
-    #[case::one_fun("[foo 1]", Expr::List(List::one(Box::new(Expr::Fun("foo".to_string(), Box::new(Expr::Num(1)))))))]
+    #[case::one_fun(
+        "[foo 1]",
+        Expr::List(List::one(Box::new(Expr::Fun(Sym::new("foo"), Box::new(Expr::Num(1))))))
+    )]
     #[case::trailing_comma("[1,]", Expr::List(List::one(Box::new(Expr::Num(1)))))]
     #[case::many(
         "[1,2]",

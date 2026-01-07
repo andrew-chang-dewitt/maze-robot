@@ -19,6 +19,16 @@ impl<T> List<T> {
         List::Cons(t, Box::new(List::Nil))
     }
 
+    pub fn map<U>(self, _f: impl Fn(T) -> U) -> List<U> {
+        todo!()
+    }
+
+    pub fn foldr<A>(self, init: A, f: impl Fn(A, T) -> A) -> A {
+        match self {
+            Self::Nil => init,
+            Self::Cons(t, ts) => ts.foldr(f(init, t), f),
+        }
+    }
     // pub fn is_empty(&self) -> bool {
     //     match self {
     //         Self::Nil => true,

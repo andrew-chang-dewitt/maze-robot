@@ -1,37 +1,47 @@
-use nostd::{boxed::Box, prelude::ToString, string::String};
+use nostd::{boxed::Box, collections::HashMap, prelude::ToString, string::String};
 
 use crate::ds::List;
 
 #[derive(Debug, PartialEq)]
-pub struct Prog(List<Stmt>);
+pub struct Prog(HashMap<Sym, Stmt>);
 
 impl Prog {
     pub fn new(stmts: List<Stmt>) -> Self {
-        Self(stmts)
+        let map: HashMap<Sym, Stmt> = stmts.foldr(HashMap::new(), |mut m, s| {
+            m.insert(s.id.clone(), s);
+            m
+        });
+
+        Self(map)
     }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Stmt {
-    id: String,
-    args: List<String>,
+    id: Sym,
+    args: List<Sym>,
     body: Expr,
 }
 
 impl Stmt {
-    pub fn new(id: &str, args: List<String>, body: Expr) -> Self {
-        Self {
-            id: id.to_string(),
-            args,
-            body,
-        }
+    pub fn new(id: Sym, args: List<Sym>, body: Expr) -> Self {
+        Self { id, args, body }
     }
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Expr {
     List(List<Box<Expr>>),
-    Fun(String, Box<Expr>),
-    Ref(String),
+    Fun(Sym, Box<Expr>),
+    Ref(Sym),
     Num(usize),
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct Sym(pub String);
+
+impl Sym {
+    pub fn new(id: &str) -> Self {
+        Self(id.to_string())
+    }
 }
