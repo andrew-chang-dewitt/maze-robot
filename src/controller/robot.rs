@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fmt::Display};
+use nostd::{boxed::Box, cell::RefCell, fmt::Display, prelude::ToString};
 
 use super::{Cell, DIR_ARR, Direction, Maze, maze::MazeError};
 
@@ -49,10 +49,10 @@ impl RobotInternal {
     }
 
     pub fn go(&self, direction: Direction) -> Result<(), MazeError> {
-        #[cfg(test)]
-        {
-            println!("[Robot::go] BEGIN go {direction} from {self}");
-        }
+        // #[cfg(test)]
+        // {
+        //     println!("[Robot::go] BEGIN go {direction} from {self}");
+        // }
         self.env
             .borrow_mut()
             .move_dir(direction)
@@ -61,7 +61,7 @@ impl RobotInternal {
 }
 
 impl Display for RobotInternal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut nostd::fmt::Formatter<'_>) -> nostd::fmt::Result {
         let state = self.env.borrow().to_string();
 
         write!(f, "Robot state:\n{state}")

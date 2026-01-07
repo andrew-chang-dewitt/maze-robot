@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use nostd::fmt::Display;
 
 mod maze;
 mod robot;
@@ -33,7 +33,7 @@ impl Direction {
 }
 
 impl Display for Direction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut nostd::fmt::Formatter<'_>) -> nostd::fmt::Result {
         let out = match self {
             Self::North => "North",
             Self::East => "East",

@@ -1,3 +1,5 @@
+use nostd::boxed::Box;
+
 #[derive(Debug)]
 pub enum List<T> {
     Cons(T, Box<List<T>>),

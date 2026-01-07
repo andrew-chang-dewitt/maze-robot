@@ -10,6 +10,7 @@ verbose = []
 anyhow = "1.0.100"
 clap = { version = "4.5.49", features = ["derive"] }
 lalrpop-util = { version = "0.22.2", features = ["lexer", "unicode"] }
+nostd = "0.1.6"
 rstest = "0.26.1"
 
 [build-dependencies]

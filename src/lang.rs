@@ -7,9 +7,10 @@ lalrpop_mod!(pub parser, "/lang/grammar.rs");
 #[cfg(test)]
 mod tests {
     use lalrpop_util::ParseError;
+    use nostd::{boxed::Box, prelude::ToString, string::String, vec};
     use rstest::rstest;
 
-    use crate::util::List;
+    use crate::ds::List;
 
     use super::ast::{Expr, Prog, Stmt};
     use super::parser::{ExprParser, ProgParser, StmtParser};

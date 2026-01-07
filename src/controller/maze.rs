@@ -1,6 +1,8 @@
-use std::{
+use nostd::{
     error::Error,
     fmt::{Debug, Display},
+    format,
+    string::String,
 };
 
 use super::{Cell, Direction};
@@ -27,7 +29,7 @@ pub enum MazeError {
 }
 
 impl Display for MazeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut nostd::fmt::Formatter<'_>) -> nostd::fmt::Result {
         let out = match self {
             Self::CreationError(msg) => format!("CreationError: {msg}"),
             Self::MoveError(direction, state) => {

@@ -1,6 +1,9 @@
-use std::str::FromStr;
+// TODO:
+// - add location tracking! https://lalrpop.github.io/lalrpop/location_tracking.html
 
-use crate::util::List;
+use nostd::{boxed::Box, string::String, prelude::ToString};
+
+use crate::ds::List;
 
 use super::ast::{Expr, Prog, Stmt};
 
@@ -11,26 +14,34 @@ grammar;
 match {
     // strings
     r"[a-zA-Z][a-zA-Z0-9_`~!@#$%^&*\-+\\':;<>,.?/]*" => Str,
+
     // numbers
     r"[0-9][0-9_]*" => Num,
+
     // commas
     "," => Comma,
+
     // bind
     "=" => Eq,
+
     // Parens
     "(" => OParen,
     ")" => CParen,
+
     // Brackets
     "[" => OBrkt,
     "]" => CBrkt,
+
     // empty rule to disable default empty rules on whitespace
     "" => {},
 } else {
     // rule to tokenize newlines
     r"\n" => NewLine,
+
     // rules to skip other whitespace
     r" *" => {},
     r"\t*" => {},
+
     // // finally, use default rules for all other cases
     // _,
 }
@@ -38,6 +49,7 @@ match {
 
 // GRAMMAR
 
+/// A Program is a list of function definition statements.
 pub Prog: Prog = <StmtList> => Prog::new(<>);
 
 StmtList: List<Stmt> = {
@@ -45,6 +57,8 @@ StmtList: List<Stmt> = {
     <Stmt> => List::one(*<>),
 };
 
+/// A Statement is a function definition, binding a list of argument symbols &
+/// an expression of those arguments to a symbol.
 pub Stmt: Box<Stmt> = {
     // function statment
     <id:Sym> <args:ArgList> Eq <body:Expr> => Box::new(Stmt::new(&id, args, *body)),
@@ -56,6 +70,8 @@ ArgList: List<String> = {
     <Sym> => List::one(<>),
 };
 
+/// An Expression is either a list, function invocation, variable reference,
+/// literal integer, or parenthetical expression.
 pub Expr: Box<Expr> = {
     // list expression
     OBrkt <ListMembs> CBrkt => Box::new(Expr::List(<>)),
@@ -85,4 +101,4 @@ ListMembs: List<Box<Expr>> = {
 Sym: String = Str => <>.to_string();
 
 /// an integer of at least one digit followed by 0 or more digits and 0 or more `_` separators
-Int: i32 = Num => i32::from_str(&<>.replace('_', "")).unwrap();
+Int: usize = Num => <>.replace('_', "").parse().unwrap();

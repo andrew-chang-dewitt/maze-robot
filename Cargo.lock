@@ -380,6 +380,7 @@ dependencies = [
  "clap",
  "lalrpop",
  "lalrpop-util",
+ "nostd",
  "rstest",
 ]
 
@@ -394,6 +395,16 @@ name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
+
+[[package]]
+name = "nostd"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be18158ad99e2f673af96c9cf045e5bb3a0813a37a29cdef18454b89c3162373"
+dependencies = [
+ "memchr",
+ "rustversion",
+]
 
 [[package]]
 name = "once_cell_polyfill"

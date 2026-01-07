@@ -1,4 +1,6 @@
-use crate::util::List;
+use nostd::{boxed::Box, prelude::ToString, string::String};
+
+use crate::ds::List;
 
 #[derive(Debug, PartialEq)]
 pub struct Prog(List<Stmt>);
@@ -31,5 +33,5 @@ pub enum Expr {
     List(List<Box<Expr>>),
     Fun(String, Box<Expr>),
     Ref(String),
-    Num(i32),
+    Num(usize),
 }
