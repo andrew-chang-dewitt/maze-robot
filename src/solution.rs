@@ -1,4 +1,9 @@
-use std::{collections::HashSet, fmt::Display};
+use std::{
+    cell::RefCell,
+    cmp::{max, min},
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
 
 use anyhow::anyhow;
 
@@ -6,7 +11,7 @@ use maze_robot::controller::{Cell, DIR_ARR, Direction, MazeError, Robot};
 
 use crate::text_maze::TextRobot;
 
-pub fn solve<M: TryInto<TextRobot, Error = MazeError>>(maze: M) -> anyhow::Result<Vec<Key>> {
+pub fn solve<M: TryInto<TextRobot, Error = MazeError>>(maze: M) -> anyhow::Result<Solution> {
     // set up robot w/ given maze
     let robot = maze.try_into()?;
 
@@ -14,21 +19,119 @@ pub fn solve<M: TryInto<TextRobot, Error = MazeError>>(maze: M) -> anyhow::Resul
     dfs_path(robot)
 }
 
-fn dfs_path(robot: TextRobot) -> anyhow::Result<Vec<Key>> {
-    let mut visited = HashSet::new();
+pub fn render_solution(solution: Solution) -> String {
+    solution.seen.to_string()
+}
 
-    match dfs_helper(&robot, Node::default(), &mut visited) {
+// TODO: track walls for visual solution? should visual solution be a compile-time feature?
+fn dfs_path(robot: TextRobot) -> anyhow::Result<Solution> {
+    let mut visited = HashSet::new();
+    let mut seen = RefCell::new(Seen::new());
+
+    match dfs_helper(&robot, Node::default(), &mut visited, &mut seen) {
         Ok(()) => Err(anyhow!("No path to the finish was found!")),
-        Err(Solution::Error(e)) => Err(e.context("Error encountered while searching for finish.")),
-        Err(Solution::Done(path)) => Ok(path.into_iter().rev().collect()),
+        Err(MaybePath::Error(e)) => Err(e.context("Error encountered while searching for finish.")),
+        Err(MaybePath::Done(path)) => Ok(Solution {
+            winner: path.into_iter().rev().collect(),
+            seen: seen.take(),
+        }),
     }
 }
 
-fn dfs_helper(robot: &TextRobot, node: Node, visited: &mut HashSet<Key>) -> Result<(), Solution> {
-    #[cfg(test)]
-    {
-        println!("[dfs_helper] BEGIN w/\n{robot},\n{node:?},\n& {visited:?}\n")
+#[derive(Debug)]
+pub struct Solution {
+    winner: Vec<Key>,
+    seen: Seen,
+}
+
+impl Display for Solution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.seen.to_string())
     }
+}
+
+#[derive(Debug, Default)]
+struct Seen {
+    key_ord: Vec<Key>,
+    key_map: HashMap<Key, Cell>,
+    min_x: isize,
+    max_x: isize,
+    min_y: isize,
+    max_y: isize,
+}
+
+impl Seen {
+    fn new() -> Self {
+        Seen {
+            key_ord: Vec::new(),
+            key_map: HashMap::new(),
+            max_x: 0,
+            min_x: 0,
+            max_y: 0,
+            min_y: 0,
+        }
+    }
+
+    fn push(&mut self, key: Key, cell: Cell) {
+        self.key_ord.push(key);
+        self.key_map.insert(key, cell);
+        self.max_x = max(self.max_x, key.0);
+        self.min_x = min(self.min_x, key.0);
+        self.max_y = max(self.max_y, key.1);
+        self.min_y = min(self.min_y, key.1);
+
+        // #[cfg(feature = "verbose")]
+        // {
+        //     println!("[Seen::push] added {key}:{cell:?}");
+        //     println!("{self}")
+        // }
+    }
+
+    fn get_by_coords(&self, x: isize, y: isize) -> Option<&Cell> {
+        self.key_map.get(&Key(x, y))
+    }
+
+    fn get_width(&self) -> isize {
+        self.max_y - self.min_y
+    }
+
+    fn get_height(&self) -> isize {
+        self.max_x - self.min_x
+    }
+}
+
+impl Display for Seen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut as_str = String::new();
+
+        for y in (self.min_y..(self.max_y + 1)).rev() {
+            for x in self.min_x..(self.max_x + 1) {
+                match self.get_by_coords(x, y) {
+                    // ▢◌○◍▦▧▩▨◈
+                    Some(Cell::Open) => as_str.push_str("·"),
+                    Some(Cell::Wall) => as_str.push_str("+"),
+                    Some(Cell::Finish) => as_str.push_str("F"),
+                    _ => as_str.push_str(" "),
+                }
+            }
+
+            as_str.push_str("\n");
+        }
+
+        write!(f, "{as_str}")
+    }
+}
+
+fn dfs_helper(
+    robot: &TextRobot,
+    node: Node,
+    visited: &mut HashSet<Key>,
+    seen: &RefCell<Seen>,
+) -> Result<(), MaybePath> {
+    // #[cfg(any(test, feature = "verbose"))]
+    // {
+    //     println!("[dfs_helper] BEGIN w/\n{robot},\n{node:?}, & {visited:?}\n")
+    // }
     let Node {
         key,
         cell,
@@ -36,12 +139,12 @@ fn dfs_helper(robot: &TextRobot, node: Node, visited: &mut HashSet<Key>) -> Resu
     } = node;
     // move robot if direction provided (otherwise at start)
     if let Some(dir) = direction {
-        robot.go(dir).map_err(|e| Solution::Error(e.into()))?;
+        robot.go(dir).map_err(|e| MaybePath::Error(e.into()))?;
     }
     // handle FINISH case
     if let Cell::Finish = cell {
         // return early as error to signal done to try_fold
-        return Err(Solution::Done(vec![key]));
+        return Err(MaybePath::Done(vec![key]));
     }
 
     // otherwise, continue
@@ -51,60 +154,71 @@ fn dfs_helper(robot: &TextRobot, node: Node, visited: &mut HashSet<Key>) -> Resu
     DIR_ARR
         .iter()
         // peek in each direction
-        .map(|&dir| (dir, robot.peek(dir)))
+        .map(|&dir| {
+            // #[cfg(feature = "verbose")]
+            // {
+            //     println!("looking to the {dir}");
+            // }
+            (dir, robot.peek(dir))
+        })
+        // track what we've seen
+        .map(|(dir, cell)| {
+            // calculate key
+            let key = key.compute_in_dir(&dir);
+            seen.borrow_mut().push(key, cell);
+            // pass item down the iter chain
+            return (dir, key, cell);
+        })
         // filter out walls, preparing rest for recurring into
-        .filter_map(|(dir, cell)| match cell {
+        .filter_map(|(dir, key, cell)| match cell {
             Cell::Wall => None,
-            _ => {
-                let next = key.compute_in_dir(&dir);
-                Some(Node {
-                    key: next,
-                    cell,
-                    direction: Some(dir),
-                })
-            }
+            _ => Some(Node {
+                key,
+                cell,
+                direction: Some(dir),
+            }),
         })
         .try_fold((), |_, node| {
             let node_key = node.key;
             let node_direction = node.direction;
-            #[cfg(test)]
-            {
-                println!("[dfs_helper] handling neighbor {node:?}\n")
-            }
+            // #[cfg(test)]
+            // {
+            //     println!("[dfs_helper] handling neighbor {node:?}\n")
+            // }
             // if in visited, skip node
             if visited.contains(&node_key) {
-                #[cfg(test)]
-                {
-                    println!("[dfs_helper] skipping neighbor in visited")
-                }
+                // #[cfg(test)]
+                // {
+                //     println!("[dfs_helper] skipping neighbor in visited")
+                // }
                 return Ok(());
             }
             // recurse into the neighboring node
-            let recur_res = dfs_helper(robot, node, visited);
+            let recur_res = dfs_helper(robot, node, visited, seen);
             match recur_res {
                 // handle done
-                Err(Solution::Done(mut path)) => {
+                Err(MaybePath::Done(mut path)) => {
                     // push current position to path
                     path.push(key);
-                    #[cfg(test)]
-                    {
-                        println!("[dfs_helper] Finish found! building solution path: {path:?}")
-                    }
+                    // #[cfg(test)]
+                    // {
+                    //     println!("[dfs_helper] Finish found! building solution path: {path:?}")
+                    // }
                     // end iteration early & propagate solution upward
                     // by returning solution as Err
-                    Err(Solution::Done(path))
+                    Err(MaybePath::Done(path))
                 }
                 // if not done, move robot back to current cell
                 // (reverse of direction used to enter the node)
                 // then continue iteration/recursion
                 Ok(()) => {
-                    #[cfg(test)]
-                    {
-                        println!("[dfs_helper] Solution not found through this node, moving back up one node.")
-                    }
+                    // #[cfg(test)]
+                    // {
+                    //     println!("[dfs_helper] Solution not found through this node, moving back up one node.")
+                    // }
                     if let Some(dir) = node_direction {
                         let new_dir = dir.reverse();
-                        robot.go(new_dir).map_err(|e| Solution::Error(e.into()))
+                        robot.go(new_dir).map_err(|e| MaybePath::Error(e.into()))
                     } else {
                         Ok(())
                     }
@@ -116,12 +230,12 @@ fn dfs_helper(robot: &TextRobot, node: Node, visited: &mut HashSet<Key>) -> Resu
                         println!("[dfs_helper] Error encountered! propagating upward...")
                     }
                     recur_res
-                },
+                }
             }
         })
 }
 
-enum Solution {
+enum MaybePath {
     Done(Vec<Key>),
     Error(anyhow::Error),
 }

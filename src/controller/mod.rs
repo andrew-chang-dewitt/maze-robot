@@ -45,7 +45,7 @@ impl Display for Direction {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Cell {
     Finish,
     Open,
