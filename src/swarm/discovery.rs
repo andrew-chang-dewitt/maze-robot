@@ -251,7 +251,6 @@ mod tests {
         // our test socket.  We simulate announce_and_collect manually so we can
         // aim at a known port instead of the production DISCOVERY_PORT.
         let sender = UdpSocket::bind("0.0.0.0:0").unwrap();
-        let sender_addr = sender.local_addr().unwrap();
         sender
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
@@ -288,7 +287,5 @@ mod tests {
             list.iter().any(|p| p.port() == fake_peer_addr.port()),
             "fake peer's port should be in the peers list after ACK"
         );
-        // Silence unused-variable warning.
-        let _ = sender_addr;
     }
 }
