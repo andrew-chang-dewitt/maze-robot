@@ -52,7 +52,7 @@ pub fn start(timeout: Duration, port: u16) -> anyhow::Result<Peers> {
 
 /// listen on given port for incoming messages
 ///
-/// whenever a new peer announces its presence (via [`ANNOUNCE`]), this aknowledges it with an
+/// whenever a new peer announces its presence (via [`ANNOUNCE`]), this acknowledges it with an
 /// [`ACKNOWLEDGE`] reply & adds the new peer to the [`Peers`] collection.
 ///
 /// silently ignores all other messages
