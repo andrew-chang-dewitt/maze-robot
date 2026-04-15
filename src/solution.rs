@@ -38,7 +38,7 @@ fn dfs_path(robot: TextRobot) -> anyhow::Result<Solution> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Eq, Debug, PartialEq)]
 pub struct Solution {
     winner: Vec<Key>,
     seen: Seen,
@@ -50,7 +50,7 @@ impl Display for Solution {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Eq, Debug, Default, PartialEq)]
 struct Seen {
     key_ord: Vec<Key>,
     key_map: HashMap<Key, Cell>,
@@ -91,11 +91,11 @@ impl Seen {
         self.key_map.get(&Key(x, y))
     }
 
-    fn get_width(&self) -> isize {
+    fn _get_width(&self) -> isize {
         self.max_y - self.min_y
     }
 
-    fn get_height(&self) -> isize {
+    fn _get_height(&self) -> isize {
         self.max_x - self.min_x
     }
 }
@@ -317,7 +317,7 @@ S +++ +
     fn can_solve_single_path_mazes(#[case] maze: &str, #[case] exp: Vec<Key>) {
         let act = solve(maze).expect("solution to be found");
 
-        assert_eq!(act, exp)
+        assert_eq!(act.winner, exp)
     }
 
     #[rstest]
@@ -327,6 +327,6 @@ S +++ +
     fn can_solve_deadend_path_mazes(#[case] maze: &str, #[case] exp: Vec<Key>) {
         let act = solve(maze).expect("solution to be found");
 
-        assert_eq!(act, exp)
+        assert_eq!(act.winner, exp)
     }
 }
