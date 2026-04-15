@@ -10,3 +10,6 @@ verbose = []
 anyhow = "1.0.100"
 clap = { version = "4.5.49", features = ["derive"] }
 rstest = "0.26.1"
+
+[dev-dependencies]
+local-ip-address = "0.6.11"
