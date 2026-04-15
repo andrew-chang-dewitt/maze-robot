@@ -1,0 +1,29 @@
+name: Cargo Test
+
+on:
+  push:
+    branches:
+      - main
+      - swarm/main
+  pull_request:
+    branches:
+      - main
+      - swarm/main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run cargo test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        run: cargo test
