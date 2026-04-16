@@ -156,16 +156,16 @@ mod tests {
 
     use super::*;
 
-    pub const WALL_MAZE: &str = r#"+++
+    const WALL_MAZE: &str = r#"+++
 +S+
 +++"#;
-    pub const TOPL_MAZE: &str = r#"S+
+    const TOPL_MAZE: &str = r#"S+
 ++"#;
-    pub const TOPR_MAZE: &str = r#"+S
+    const TOPR_MAZE: &str = r#"+S
 ++"#;
-    pub const BOTL_MAZE: &str = r#"++
+    const BOTL_MAZE: &str = r#"++
 S+"#;
-    pub const BOTR_MAZE: &str = r#"++
+    const BOTR_MAZE: &str = r#"++
 +S"#;
 
     #[rstest]

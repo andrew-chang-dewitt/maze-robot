@@ -18,6 +18,26 @@ impl TryFrom<&str> for TextRobot {
     }
 }
 
+impl TryFrom<&String> for TextRobot {
+    type Error = MazeError;
+
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        let maze = TextMaze::try_from(value.as_str())?;
+
+        Ok(TextRobot(RobotInternal::new(maze)))
+    }
+}
+
+impl TryFrom<String> for TextRobot {
+    type Error = MazeError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let maze = TextMaze::try_from(value.as_str())?;
+
+        Ok(TextRobot(RobotInternal::new(maze)))
+    }
+}
+
 impl Robot for TextRobot {
     fn get_internal(&self) -> &RobotInternal {
         &self.0
@@ -37,20 +57,20 @@ mod tests {
 
     use super::*;
 
-    pub const WALL_MAZE: &str = r#"+++
+    const WALL_MAZE: &str = r#"+++
 +S+
 +++"#;
-    pub const OPEN_MAZE: &str = r#"   
+    const OPEN_MAZE: &str = r#"   
  S 
    "#;
-    pub const FNSH_MAZE: &str = r#"SF"#;
-    pub const TOPL_MAZE: &str = r#"S 
+    const FNSH_MAZE: &str = r#"SF"#;
+    const TOPL_MAZE: &str = r#"S 
   "#;
-    pub const TOPR_MAZE: &str = r#" S
+    const TOPR_MAZE: &str = r#" S
   "#;
-    pub const BOTL_MAZE: &str = r#"  
+    const BOTL_MAZE: &str = r#"  
 S "#;
-    pub const BOTR_MAZE: &str = r#"  
+    const BOTR_MAZE: &str = r#"  
  S"#;
 
     fn make_robot(maze: &str) -> TextRobot {

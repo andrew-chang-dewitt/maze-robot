@@ -9,11 +9,7 @@ use std::{
 use anyhow::anyhow;
 use clap::Parser;
 
-use maze_robot::{
-    Cell, DIR_ARR, Direction,
-    text_maze::TextRobot,
-    traits::{MazeError, Robot},
-};
+use maze_robot::{Cell, DIR_ARR, Direction, new_bot, text_maze::TextRobot, traits::Robot};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -24,26 +20,19 @@ struct App {
 fn main() -> anyhow::Result<()> {
     let app = App::parse();
     let maze_text = read_to_string(app.maze_file)?;
-    let solution = solve(maze_text.as_str())?;
+    let robot: TextRobot = new_bot(maze_text)?;
+    let solution = dfs_path(robot)?;
 
     println!("Solution:\n{}", render_solution(solution));
 
     Ok(())
 }
 
-pub fn solve<M: TryInto<TextRobot, Error = MazeError>>(maze: M) -> anyhow::Result<Solution> {
-    // set up robot w/ given maze
-    let robot = maze.try_into()?;
-
-    // find solution w/ dfs
-    dfs_path(robot)
-}
-
-pub fn render_solution(solution: Solution) -> String {
+fn render_solution(solution: Solution) -> String {
     solution.seen.to_string()
 }
 
-// TODO: track walls for visual solution? should visual solution be a compile-time feature?
+// TODO: should visual solution be a compile-time feature?
 fn dfs_path(robot: TextRobot) -> anyhow::Result<Solution> {
     let mut visited = HashSet::new();
     let mut seen = RefCell::new(Seen::new());
@@ -335,7 +324,8 @@ S +++ +
     #[case("SF",vec![Key(0,0),Key(1,0)])]
     #[case("S +\n+ F",vec![Key(0,0),Key(1,0),Key(1,-1),Key(2,-1)])]
     fn can_solve_single_path_mazes(#[case] maze: &str, #[case] exp: Vec<Key>) {
-        let act = solve(maze).expect("solution to be found");
+        let robot: TextRobot = new_bot(maze).expect("robot to initialize");
+        let act = dfs_path(robot).expect("solution to be found");
 
         assert_eq!(act.winner, exp)
     }
@@ -345,7 +335,8 @@ S +++ +
     #[case(MULTI_BRANCH_A,vec![Key(0,0),Key(1,0),Key(2,0)])]
     #[case(MULTI_BRANCH_B,vec![Key(0,0),Key(1,0),Key(1,-1),Key(2,-1),Key(3,-1),Key(4,-1),Key(5,-1),Key(5,0),Key(5,1),Key(6,1)])]
     fn can_solve_deadend_path_mazes(#[case] maze: &str, #[case] exp: Vec<Key>) {
-        let act = solve(maze).expect("solution to be found");
+        let robot: TextRobot = new_bot(maze).expect("robot to initialize");
+        let act = dfs_path(robot).expect("solution to be found");
 
         assert_eq!(act.winner, exp)
     }
