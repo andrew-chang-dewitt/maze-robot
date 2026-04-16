@@ -1,3 +1,3 @@
-[jobs.run-verbose]
-command = ["cargo", "run", "--features", "verbose", "./test-maze.txt"]
+[jobs.run-text-dfs-verbose]
+command = ["cargo", "run", "--bin", "text_dfs", "--features", "verbose", "./test-maze.txt"]
 need_stdout = true
