@@ -4,6 +4,12 @@ use std::fmt::Display;
 pub mod text_maze;
 pub mod traits;
 
+use traits::{MazeError, Robot};
+
+/// utility function for easily getting handle to a new concrete Robot instance from a given Maze-like source
+pub fn new_bot<R: Robot, M: TryInto<R, Error = MazeError>>(maze: M) -> Result<R, MazeError> {
+    maze.try_into()
+}
 pub const DIR_ARR: [Direction; 4] = [
     Direction::North,
     Direction::East,

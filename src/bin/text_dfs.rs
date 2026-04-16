@@ -30,6 +30,7 @@ fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
 pub fn solve<M: TryInto<TextRobot, Error = MazeError>>(maze: M) -> anyhow::Result<Solution> {
     // set up robot w/ given maze
     let robot = maze.try_into()?;
