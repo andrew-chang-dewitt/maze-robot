@@ -3,14 +3,33 @@ use std::{
     cmp::{max, min},
     collections::{HashMap, HashSet},
     fmt::Display,
+    fs::read_to_string,
 };
 
 use anyhow::anyhow;
+use clap::Parser;
 
-use maze_robot::controller::{Cell, DIR_ARR, Direction, MazeError, Robot};
+use maze_robot::{
+    Cell, DIR_ARR, Direction,
+    text_maze::TextRobot,
+    traits::{MazeError, Robot},
+};
 
-use crate::text_maze::TextRobot;
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct App {
+    maze_file: String,
+}
 
+fn main() -> anyhow::Result<()> {
+    let app = App::parse();
+    let maze_text = read_to_string(app.maze_file)?;
+    let solution = solve(maze_text.as_str())?;
+
+    println!("Solution:\n{}", render_solution(solution));
+
+    Ok(())
+}
 pub fn solve<M: TryInto<TextRobot, Error = MazeError>>(maze: M) -> anyhow::Result<Solution> {
     // set up robot w/ given maze
     let robot = maze.try_into()?;

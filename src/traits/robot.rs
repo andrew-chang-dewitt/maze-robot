@@ -1,6 +1,8 @@
 use std::{cell::RefCell, fmt::Display};
 
-use super::{Cell, DIR_ARR, Direction, Maze, maze::MazeError};
+use crate::{Cell, DIR_ARR, Direction};
+
+use super::{Maze, maze::MazeError};
 
 pub trait Robot {
     fn get_internal(&self) -> &RobotInternal;

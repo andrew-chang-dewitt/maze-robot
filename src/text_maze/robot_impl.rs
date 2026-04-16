@@ -1,8 +1,9 @@
 use std::fmt::Display;
 
-use maze_robot::controller::{MazeError, Robot, RobotInternal};
-
-use crate::text_maze::TextMaze;
+use crate::{
+    text_maze::TextMaze,
+    traits::{MazeError, Robot, RobotInternal},
+};
 
 #[derive(Debug)]
 pub struct TextRobot(RobotInternal);
@@ -31,7 +32,7 @@ impl Display for TextRobot {
 
 #[cfg(test)]
 mod tests {
-    use maze_robot::controller::{Cell, Direction};
+    use crate::{Cell, Direction};
     use rstest::rstest;
 
     use super::*;

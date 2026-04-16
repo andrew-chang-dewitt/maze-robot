@@ -3,7 +3,7 @@ use std::{
     fmt::{Debug, Display},
 };
 
-use super::{Cell, Direction};
+use crate::{Cell, Direction};
 
 /// A Maze is the actual environment our robot will move in.
 ///

@@ -1,8 +1,10 @@
 use std::fmt::Display;
 
-use maze_robot::controller::{Cell, Direction, Maze, MazeError};
-
-use crate::text_maze::TextCell;
+use crate::{
+    Cell, Direction,
+    text_maze::TextCell,
+    traits::{Maze, MazeError},
+};
 
 /// A maze encoded by a string, where:
 /// - 'S' is starting location
