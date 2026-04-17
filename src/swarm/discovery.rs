@@ -43,7 +43,7 @@ pub fn start(timeout: Duration, port: u16) -> anyhow::Result<Peers> {
     ready.wait();
 
     // announce this bot to network
-    announce(port, peers.clone(), Duration::from_secs(30))?;
+    announce(port, peers.clone(), timeout)?;
 
     // return ref to peers collection -- it will continue to receive updates as new peers are
     // discovered
@@ -69,7 +69,9 @@ fn listen(
     ready.wait();
 
     // set socket recv timeout to stop from blocking indefinitely
-    socket.set_read_timeout(Some(Duration::from_millis(10)));
+    socket
+        .set_read_timeout(Some(Duration::from_millis(10)))
+        .context("failed to set discovery listener socket read timeout")?;
     // when discovery ends
     // listen for new peer announcements until discovery ends
     while *is_discovering
@@ -77,7 +79,16 @@ fn listen(
         .expect("discovery flag mutex poisoned!")
     {
         // get messages on listen socket
-        let (len, from) = socket.recv_from(&mut buf)?;
+        let (len, from) = match socket.recv_from(&mut buf) {
+            Ok(result) => result,
+            Err(err)
+                if err.kind() == io::ErrorKind::WouldBlock
+                    || err.kind() == io::ErrorKind::TimedOut =>
+            {
+                continue;
+            }
+            Err(err) => return Err(err.into()),
+        };
         // & when new peer announced
         if &buf[..len] == ANNOUNCE {
             // aknowledge new peer
@@ -114,6 +125,7 @@ fn announce(discovery_port: u16, peers: Peers, timeout: Duration) -> anyhow::Res
         match socket.recv_from(&mut buf) {
             // add responders to peers
             Ok((len, from)) if &buf[..len] == ACKNOWLEDGE => {
+                // FIXME: replace w/ proper logging at some point
                 println!(
                     "[announce] received '{}' from peer @ {from}",
                     String::from_utf8((&buf[..len]).to_vec()).expect("message should be decodable")
