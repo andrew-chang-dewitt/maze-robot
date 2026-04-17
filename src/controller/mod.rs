@@ -2,7 +2,6 @@ use std::fmt::Display;
 
 mod maze;
 mod robot;
-mod swarm;
 
 pub use maze::{Maze, MazeError};
 pub use robot::{Robot, RobotInternal};
