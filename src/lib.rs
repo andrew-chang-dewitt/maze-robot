@@ -1,3 +1,4 @@
+#![feature(oneshot_channel)]
 use std::fmt::Display;
 
 // pub mod dist_maze;
