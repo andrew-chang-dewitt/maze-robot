@@ -11,8 +11,6 @@ use std::{
 pub struct Broadcaster {
     /// socket address to broadcast message to
     tgt_addr: SocketAddr,
-    /// a prefix to be prepended to every message broadcasted
-    tgt_prfx: String,
     /// socket used to send messages
     snd_sock: UdpSocket,
 }
@@ -20,35 +18,38 @@ pub struct Broadcaster {
 impl Broadcaster {
     /// send
     pub fn send<'a>(&self, msg: impl Into<String>) -> Result<(), CommsErr> {
-        let buf_str = format!("{}_{}", self.tgt_prfx, msg.into());
-        let buf = buf_str.as_bytes();
-        self.snd_sock.send_to(buf, self.tgt_addr)?;
+        self.snd_sock
+            .send_to(msg.into().as_bytes(), self.tgt_addr)?;
 
         Ok(())
     }
 }
 
-#[derive(Debug)]
-/// obj encapsulating ability to listen for messages broadcasted on the local network over UDP.
-pub struct Listener {
-    /// socket to listen on
-    sock: Arc<UdpSocket>,
+pub trait SocketProvider {
+    /// get a reference to a UdpSocket
+    fn get_sock_ref(&self) -> &UdpSocket;
+    /// get socket wrapped in Arc for threadsafe borrowing
+    fn get_sock_arc(&self) -> Arc<UdpSocket>;
 }
 
-impl Listener {
-    /// block until a message is received or timeout is reached (defaults to 10 seconds), return
-    /// message received on success
-    pub fn rcv_once(self, timeout: Option<Duration>) -> Result<(usize, [u8; 64]), CommsErr> {
-        // set read timeout, using default if not given
-        self.sock
-            .set_read_timeout(timeout.or(Some(Duration::from_secs(10))))?;
+/// Behaviour to listen for messages broadcasted on the local network over UDP. offers methods to
+/// get one message or to listen in a loop & call a handler on each message received. requires
+/// ability to borrow a UdpSocket
+pub trait Listener: SocketProvider {
+    /// receive a message & return it. will block until message is received unless Some(Duration)
+    /// is given as timeout.
+    fn rcv_once(&self, timeout: Option<Duration>) -> Result<(usize, [u8; 64]), CommsErr> {
+        let sock = self.get_sock_ref();
+        sock.set_read_timeout(timeout)?;
 
         // listen for message
         let mut buf = [0u8; 64];
-        let (len, _) = self.sock.recv_from(&mut buf)?;
+        let (len, _) = sock.recv_from(&mut buf)?;
 
-        // clear timeout
-        self.sock.set_read_timeout(None)?;
+        // clear timeout if one was set
+        if timeout.is_some() {
+            sock.set_read_timeout(None)?;
+        }
 
         Ok((len, buf))
     }
@@ -57,32 +58,34 @@ impl Listener {
     ///
     /// returns [`StopListenHandle`] if listener start successfully, used to kill listener
     /// thread if needed.
-    pub fn start(
-        &mut self,
+    fn start(
+        &self,
         on_msg: impl Fn(usize, [u8; 64], SocketAddr) -> Result<(), CommsErr> + Send + 'static,
     ) -> Result<StopListenHandle, CommsErr> {
-        // set read timeout, using default if not given
-        self.sock
-            .set_read_timeout(Some(Duration::from_millis(10)))?;
-        // get ref to socket to pass to looped listening thread
-        let sock_copy = Arc::clone(&self.sock);
-        // create kill signal
-        let (sndr, rcvr) = oneshot::channel();
+        // get copy of socket for passing to thread
+        let sock = self.get_sock_arc();
+        // set read timeout to keep from blocking kill signal in loop
+        sock.set_read_timeout(Some(Duration::from_millis(10)))?;
+        // create kill signal & return listener channels
+        let (kill_sndr, kill_rcvr) = oneshot::channel();
 
         thread::spawn(move || {
-            let mut rcvr_copy = rcvr;
+            let mut rcvr_copy = kill_rcvr;
 
             loop {
                 // check if received kill command
                 match rcvr_copy.try_recv() {
+                    // end loop if so
                     Ok(_) | Err(oneshot::TryRecvError::Disconnected) => break,
+                    // otherwise continue
                     Err(oneshot::TryRecvError::Empty(rx)) => {
                         // restore kill signal receiver
                         rcvr_copy = rx;
                     }
                 };
+                // attempt to read a message
                 let mut buf = [0u8; 64];
-                match sock_copy.recv_from(&mut buf) {
+                match sock.recv_from(&mut buf) {
                     // call handler when message received successfully
                     Ok((len, from)) => on_msg(len, buf, from),
                     // end loop iter if timed out or blocked; gives chance to check if is_listening flag
@@ -94,21 +97,21 @@ impl Listener {
                         continue;
                     }
                     // otherwise exit in error state
-                    Err(e) => return Err(CommsErr::HandlerError),
+                    Err(_) => return Err(CommsErr::HandlerError),
                 };
             }
 
             Ok(())
         });
 
-        Ok(StopListenHandle(sndr))
+        Ok(StopListenHandle(kill_sndr))
     }
 }
 
-struct StopListenHandle(oneshot::Sender<()>);
+pub struct StopListenHandle(oneshot::Sender<()>);
 
 impl StopListenHandle {
-    fn stop(self) -> Result<(), CommsErr> {
+    pub fn stop(self) -> Result<(), CommsErr> {
         self.0.send(()).map_err(|_| CommsErr::ThreadError)
     }
 }
@@ -131,8 +134,6 @@ impl From<BuildError> for CommsErr {
 pub struct BroadcastBuilder {
     /// the port number that messages should be broadcast to
     pub tgt_port: Option<u16>,
-    /// a prefix to be prepended to every message broadcasted
-    pub tgt_prfx: Option<String>,
     /// address at which to open socket for broadcasting from
     pub snd_addr: Option<SocketAddr>,
 }
@@ -141,15 +142,7 @@ impl BroadcastBuilder {
     pub fn new() -> Self {
         Self {
             tgt_port: None,
-            tgt_prfx: None,
             snd_addr: None,
-        }
-    }
-
-    pub fn prefix(self, prefix: impl Into<String>) -> Self {
-        Self {
-            tgt_prfx: Some(prefix.into()),
-            ..self
         }
     }
 
@@ -161,8 +154,6 @@ impl BroadcastBuilder {
     }
 
     pub fn try_init(self) -> Result<Broadcaster, CommsErr> {
-        // message prefix must be given
-        let tgt_prfx = self.tgt_prfx.ok_or(BuildError::MissingPrefix)?;
         // broadcast port must be given
         let tgt_addr = SocketAddr::new(
             IpAddr::V4(Ipv4Addr::BROADCAST),
@@ -179,11 +170,7 @@ impl BroadcastBuilder {
         // & enable broadcast mode
         snd_sock.set_broadcast(true)?;
 
-        Ok(Broadcaster {
-            tgt_addr,
-            tgt_prfx,
-            snd_sock,
-        })
+        Ok(Broadcaster { tgt_addr, snd_sock })
     }
 }
 
@@ -228,25 +215,21 @@ impl ListenBuilder {
         }
     }
 
-    pub fn try_init(self) -> Result<Listener, CommsErr> {
+    pub fn try_init_sock(self) -> Result<UdpSocket, CommsErr> {
         // use given address
         let addr = SocketAddr::new(
             self.addr.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
             self.port.ok_or(BuildError::MissingPort)?,
         );
         // then bind socket to this addr
-        let sock = UdpSocket::bind(addr)?;
-
-        Ok(Listener {
-            sock: Arc::new(sock),
-        })
+        UdpSocket::bind(addr).map_err(|e| e.into())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::{Arc, Barrier, Mutex},
+        sync::{Arc, Mutex},
         thread::{self, sleep},
     };
 
@@ -254,16 +237,12 @@ mod tests {
 
     #[test]
     fn a_scream_into_void_can_be_heard() {
-        let prefix = "AAAAAAAAA";
         let msg = "AAAAAAAAA";
-        // expected message to be received
-        let exp = format!("{}_{}", prefix, msg);
 
         // broadcast port to target
         let port = 6002;
         // configure Broadcaster to be tested
         let broadcaster = BroadcastBuilder::new()
-            .prefix(prefix.to_string())
             .port(port)
             .try_init()
             .expect("failed to initialize Broadcaster for testing");
@@ -297,8 +276,22 @@ mod tests {
         let act = &rcvd[..len];
 
         // compare to expected message
-        assert_eq!(act, exp.as_bytes());
+        assert_eq!(act, msg.as_bytes());
     }
+
+    struct TestListener(Arc<UdpSocket>);
+
+    impl SocketProvider for TestListener {
+        fn get_sock_ref(&self) -> &UdpSocket {
+            &self.0
+        }
+
+        fn get_sock_arc(&self) -> Arc<UdpSocket> {
+            Arc::clone(&self.0)
+        }
+    }
+
+    impl Listener for TestListener {}
 
     #[test]
     fn listen_closely_and_you_can_still_hear_the_screams() {
@@ -311,11 +304,12 @@ mod tests {
         let addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let port = 6003;
         // configure test Listener
-        let listener = ListenBuilder::new()
+        let sock = ListenBuilder::new()
             .addr(addr)
             .port(port)
-            .try_init()
+            .try_init_sock()
             .expect("failed to initialize Listener");
+        let listener = TestListener(Arc::new(sock));
         // start Listener in new thread
         let listen_t = thread::Builder::new()
             .name("test_listener".to_string())
@@ -350,11 +344,12 @@ mod tests {
         let port = 6104;
 
         // configure test Listener
-        let mut listener = ListenBuilder::new()
+        let sock = ListenBuilder::new()
             .addr(addr)
             .port(port)
-            .try_init()
+            .try_init_sock()
             .expect("failed to initialize Listener");
+        let listener = TestListener(Arc::new(sock));
 
         // vec to store messages received by testing listener
         let received = Arc::new(Mutex::new(Vec::new()));
