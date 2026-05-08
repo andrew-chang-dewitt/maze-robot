@@ -10,3 +10,18 @@ verbose = []
 anyhow = "1.0.100"
 clap = { version = "4.5.49", features = ["derive"] }
 rstest = "0.26.1"
+
+[[example]]
+name = "text-dfs"
+path = "examples/text_dfs.rs"
+test = true
+
+[[example]]
+name = "dist-maze"
+path = "examples/dist_maze.rs"
+test = true
+
+[[example]]
+name = "dist-bot"
+path = "examples/dist_bot.rs"
+test = true

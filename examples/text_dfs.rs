@@ -6,7 +6,7 @@ use std::{
     fs::read_to_string,
 };
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use clap::Parser;
 
 use maze_robot::{Cell, DIR_ARR, Direction, new_bot, text_maze::TextRobot, traits::Robot};
@@ -118,7 +118,7 @@ impl Display for Seen {
                 match self.get_by_coords(x, y) {
                     // ▢◌○◍▦▧▩▨◈
                     Some(Cell::Open) => as_str.push_str("·"),
-                    Some(Cell::Wall) => as_str.push_str("+"),
+                    Some(Cell::Wall) => as_str.push_str("░"),
                     Some(Cell::Finish) => as_str.push_str("F"),
                     _ => as_str.push_str(" "),
                 }

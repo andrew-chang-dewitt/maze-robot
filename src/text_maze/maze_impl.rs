@@ -3,7 +3,7 @@ use std::fmt::Display;
 use crate::{
     Cell, Direction,
     text_maze::TextCell,
-    traits::{Maze, MazeError},
+    traits::{Maze, MazeError, MazeErrorType},
 };
 
 /// A maze encoded by a string, where:
@@ -82,7 +82,10 @@ impl Maze for TextMaze {
                     _ => Some(pos),
                 }
             })
-            .ok_or(MazeError::MoveError(direction, self.to_string()))?;
+            .ok_or(MazeError::new(MazeErrorType::MoveError(
+                direction,
+                self.to_string(),
+            )))?;
 
         Ok(())
     }
@@ -102,8 +105,10 @@ impl TryFrom<&str> for TextMaze {
                         '\n' => match acc.2 {
                             Some(width) => {
                                 if ((idx + 1) % (width + 1)) != 0 {
-                                    return Err(MazeError::CreationError(String::from(
-                                        "TextMaze must have all lines with equal lengths.",
+                                    return Err(MazeError::new(MazeErrorType::CreationError(
+                                        String::from(
+                                            "TextMaze must have all lines with equal lengths.",
+                                        ),
                                     )));
                                 }
                             }
@@ -116,15 +121,15 @@ impl TryFrom<&str> for TextMaze {
                     Ok(acc)
                 })?;
 
-        let loc = maybe_loc.ok_or(MazeError::CreationError(String::from(
+        let loc = maybe_loc.ok_or(MazeError::new(MazeErrorType::CreationError(String::from(
             "TextMaze must specify start location w/ 'S'",
-        )))?;
+        ))))?;
         let width = match maybe_width {
             Some(w) => Ok(w),
             None if !chars.iter().all(|c| c == &'\n') => Ok(chars.len()),
-            _ => Err(MazeError::CreationError(String::from(
+            _ => Err(MazeError::new(MazeErrorType::CreationError(String::from(
                 "TextMaze cannot have empty lines",
-            ))),
+            )))),
         }?;
 
         Ok(TextMaze { chars, loc, width })
@@ -189,15 +194,11 @@ S+"#;
         #[values(WALL_MAZE, TOPL_MAZE, TOPR_MAZE, BOTL_MAZE, BOTR_MAZE)] state: &str,
     ) {
         let mut maze = TextMaze::try_from(state).expect("maze to create successfully");
+        let err = maze.move_dir(direction).expect_err("should have returned error when trying to move {direction:?} in maze:\n{state}\ninstead, got new state:\n{}");
 
-        match maze.move_dir(direction) {
-            Ok(_) => panic!(
-                "should have returned error when trying to move {direction:?} in maze:\n{state}\ninstead, got new state:\n{}",
-                maze.to_string()
-            ),
-
-            Err(MazeError::MoveError(_, _)) => (),
-            Err(e) => panic!("expected UpdateError, got {e:?}"),
+        match err.get_type() {
+            MazeErrorType::MoveError(_, _) => (),
+            _ => panic!("expected MoveError, got {err:?}"),
         }
     }
 }

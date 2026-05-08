@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-// pub mod dist_maze;
+pub mod dist_maze;
 pub mod text_maze;
 pub mod traits;
 
