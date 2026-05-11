@@ -17,7 +17,7 @@ pub const DIR_ARR: [Direction; 4] = [
     Direction::West,
 ];
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Direction {
     North,
     East,
@@ -52,6 +52,7 @@ impl Display for Direction {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Cell {
     Finish,
+    Occupied,
     Open,
     Wall,
 }

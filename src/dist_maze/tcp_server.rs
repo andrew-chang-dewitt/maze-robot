@@ -1,6 +1,7 @@
 use std::io;
 use std::net::{TcpListener, TcpStream};
 
+#[derive(Debug)]
 pub struct TcpServer {
     listener: TcpListener,
 }

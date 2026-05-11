@@ -4,19 +4,15 @@ use crate::{Cell, Direction};
 
 use super::MazeError;
 
-/// A Maze is the actual environment our robot will move in.
-///
-/// As a maze is unknown to the robot, it provides very little in the way of information, exposing
-/// only two capabilities: look in some direction (`look_dir`) & move in some direction
-/// (`move_dir`).
-pub trait Maze: Debug + Display {
+/// Like [super::maze::`Maze`], but allows for possibility of multiple robots in the same maze.
+pub trait MultiMaze: Debug + Display {
     /// Look in the given direction from the robot with the corresponding ID & tell the caller what type of Cell was seen.
     ///
     /// If no known robot matches the given ID, a [`MazeError::UnknownRobot`] will be returned
-    fn look_dir(&self, direction: Direction) -> Result<Cell, MazeError>;
+    fn look_dir(&self, id: usize, direction: Direction) -> Result<Cell, MazeError>;
 
     /// Attempt to move the robot with the corresponding ID in the given direction.
     ///
     /// If not possible, a [`MazeError::MoveError`] will be returned.
-    fn move_dir(&mut self, direction: Direction) -> Result<(), MazeError>;
+    fn move_dir(&mut self, id: usize, direction: Direction) -> Result<(), MazeError>;
 }

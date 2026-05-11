@@ -168,7 +168,10 @@ fn dfs_helper(
             // {
             //     println!("looking to the {dir}");
             // }
-            (dir, robot.peek(dir))
+            (
+                dir,
+                robot.peek(dir).expect("this is infalliable w/ only 1 bot"),
+            )
         })
         // track what we've seen
         .map(|(dir, cell)| {

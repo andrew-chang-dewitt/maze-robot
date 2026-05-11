@@ -1,18 +1,14 @@
 use std::{cell::RefCell, fmt::Display};
 
-use crate::{Cell, DIR_ARR, Direction};
+use crate::{Cell, Direction};
 
-use super::{Maze, maze::MazeError};
+use super::{Maze, MazeError};
 
 pub trait Robot {
     fn get_internal(&self) -> &RobotInternal;
 
-    fn peek(&self, direction: Direction) -> Cell {
+    fn peek(&self, direction: Direction) -> Result<Cell, MazeError> {
         self.get_internal().peek(direction)
-    }
-
-    fn peek_all(&self) -> [(Cell, Direction); 4] {
-        self.get_internal().peek_all()
     }
 
     fn go(&self, direction: Direction) -> Result<(), MazeError> {
@@ -42,12 +38,8 @@ impl RobotInternal {
         }
     }
 
-    pub fn peek(&self, direction: Direction) -> Cell {
+    pub fn peek(&self, direction: Direction) -> Result<Cell, MazeError> {
         self.env.borrow().look_dir(direction)
-    }
-
-    pub fn peek_all(&self) -> [(Cell, Direction); 4] {
-        DIR_ARR.map(|dir| (self.peek(dir), dir))
     }
 
     pub fn go(&self, direction: Direction) -> Result<(), MazeError> {

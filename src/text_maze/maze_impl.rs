@@ -65,11 +65,14 @@ impl TextMaze {
 }
 
 impl Maze for TextMaze {
-    fn look_dir(&self, direction: Direction) -> Cell {
-        self.get_posn_in_dir(direction)
+    fn look_dir(&self, direction: Direction) -> Result<Cell, MazeError> {
+        // this is falliable when only 1 bot, no need to worry about the MazeError case (just out
+        // of bounds chars)
+        Ok(self
+            .get_posn_in_dir(direction)
             .and_then(|pos| self.chars.get(pos))
             .map(|chr| TextCell::from(chr).into())
-            .unwrap_or(Cell::Wall)
+            .unwrap_or(Cell::Wall))
     }
 
     fn move_dir(&mut self, direction: Direction) -> Result<(), MazeError> {

@@ -84,7 +84,7 @@ S "#;
     ) {
         let rob = make_robot(WALL_MAZE);
 
-        match rob.peek(direction) {
+        match rob.peek(direction).expect("should never fail w/ one bot") {
             Cell::Wall => (),
             _ => panic!("Expected peeking in {direction:?} to return Cell::Wall"),
         }
@@ -97,7 +97,7 @@ S "#;
     ) {
         let rob = make_robot(OPEN_MAZE);
 
-        match rob.peek(direction) {
+        match rob.peek(direction).expect("should never fail w/ one bot") {
             Cell::Open => (),
             _ => panic!("Expected peeking in {direction:?} to return Cell::Open"),
         }
@@ -110,7 +110,7 @@ S "#;
     #[case((TOPL_MAZE,Direction::East),Cell::Open)]
     fn test_peek_topl_corner(#[case] (maze, dir): (&str, Direction), #[case] exp: Cell) {
         let rob = make_robot(maze);
-        let act = rob.peek(dir);
+        let act = rob.peek(dir).expect("should never fail w/ one bot");
 
         assert_eq!(act, exp)
     }
@@ -122,7 +122,7 @@ S "#;
     #[case((TOPR_MAZE,Direction::West),Cell::Open)]
     fn test_peek_topr_corner(#[case] (maze, dir): (&str, Direction), #[case] exp: Cell) {
         let rob = make_robot(maze);
-        let act = rob.peek(dir);
+        let act = rob.peek(dir).expect("should never fail w/ one bot");
 
         assert_eq!(act, exp)
     }
@@ -134,7 +134,7 @@ S "#;
     #[case((BOTL_MAZE,Direction::East),Cell::Open)]
     fn test_peek_botl_corner(#[case] (maze, dir): (&str, Direction), #[case] exp: Cell) {
         let rob = make_robot(maze);
-        let act = rob.peek(dir);
+        let act = rob.peek(dir).expect("should never fail w/ one bot");
 
         assert_eq!(act, exp)
     }
@@ -146,7 +146,7 @@ S "#;
     #[case((BOTR_MAZE,Direction::West),Cell::Open)]
     fn test_peek_botr_corner(#[case] (maze, dir): (&str, Direction), #[case] exp: Cell) {
         let rob = make_robot(maze);
-        let act = rob.peek(dir);
+        let act = rob.peek(dir).expect("should never fail w/ one bot");
 
         assert_eq!(act, exp)
     }
@@ -154,7 +154,9 @@ S "#;
     #[rstest]
     fn test_peek_finish() {
         let rob = make_robot(FNSH_MAZE);
-        let act = rob.peek(Direction::East);
+        let act = rob
+            .peek(Direction::East)
+            .expect("should never fail w/ one bot");
 
         assert_eq!(act, Cell::Finish)
     }
