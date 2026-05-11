@@ -7,10 +7,12 @@ use crate::Direction;
 
 mod maze;
 mod multi_maze;
+mod multi_maze_handle;
 mod robot;
 
 pub use maze::Maze;
 pub use multi_maze::MultiMaze;
+pub use multi_maze_handle::MultiMazeHandle;
 pub use robot::{Robot, RobotInternal};
 
 #[derive(Debug)]
