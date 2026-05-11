@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fmt::Display,
     net::{SocketAddr, TcpListener, TcpStream},
 };
@@ -52,10 +53,15 @@ impl TryFrom<SocketAddr> for DistMazeClient {
 #[derive(Debug)]
 pub struct DistMazeServer<M: MultiMaze> {
     maze: M,
+    bots: HashMap<usize, usize>,
     server: TcpServer,
 }
 
-impl<M: MultiMaze> DistMazeServer<M> {}
+impl<M: MultiMaze> DistMazeServer<M> {
+    pub fn start(&self) -> Result<(), MazeError> {
+        todo!()
+    }
+}
 
 impl<M: MultiMaze> TryFrom<(M, SocketAddr)> for DistMazeServer<M> {
     type Error = MazeError;
@@ -70,7 +76,7 @@ impl<M: MultiMaze> TryFrom<(M, SocketAddr)> for DistMazeServer<M> {
         })?;
         let server = TcpServer::new(listener);
 
-        Ok(Self { maze, server })
+        Ok(Self { maze, server, bots: HashMap::new() })
     }
 }
 
