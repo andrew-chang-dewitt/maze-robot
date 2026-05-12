@@ -15,4 +15,15 @@ pub trait MultiMaze: Debug + Display {
     ///
     /// If not possible, a [`MazeError::MoveError`] will be returned.
     fn move_dir(&mut self, id: usize, direction: Direction) -> Result<(), MazeError>;
+
+    /// Register a new bot, placing it at the next available start cell (round-robin).
+    ///
+    /// Returns the assigned bot id. Returns [`MazeError::CreationError`] if no start cells exist.
+    fn add_bot(&mut self) -> Result<usize, MazeError>;
+
+    /// Returns true if a bot with the given id has been registered.
+    fn has_bot(&self, id: usize) -> bool;
+
+    /// Returns a snapshot of all currently registered bot ids.
+    fn bot_ids(&self) -> Vec<usize>;
 }

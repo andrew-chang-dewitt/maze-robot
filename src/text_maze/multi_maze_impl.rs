@@ -18,6 +18,7 @@ fn bot_char(id: usize) -> char {
 #[derive(Debug)]
 pub struct MultiTextMaze {
     chars: Vec<char>,
+    starts: Vec<usize>,
     locs: Vec<usize>,
     occupied: HashSet<usize>,
     width: usize,
@@ -62,6 +63,7 @@ impl MultiTextMaze {
 
 impl MultiMaze for MultiTextMaze {
     fn look_dir(&self, id: usize, direction: Direction) -> Result<Cell, MazeError> {
+        // TODO: revisit id validation — consider routing through has_bot once trait stabilizes
         if id >= self.locs.len() {
             return Err(MazeError::new(MazeErrorType::UnknownRobot(id)));
         }
@@ -82,6 +84,7 @@ impl MultiMaze for MultiTextMaze {
     }
 
     fn move_dir(&mut self, id: usize, direction: Direction) -> Result<(), MazeError> {
+        // TODO: revisit id validation — consider routing through has_bot once trait stabilizes
         if id >= self.locs.len() {
             return Err(MazeError::new(MazeErrorType::UnknownRobot(id)));
         }
@@ -112,26 +115,41 @@ impl MultiMaze for MultiTextMaze {
 
         Ok(())
     }
-}
 
-impl TryFrom<(String, usize)> for MultiTextMaze {
-    type Error = MazeError;
+    fn add_bot(&mut self) -> Result<usize, MazeError> {
+        if self.starts.is_empty() {
+            return Err(MazeError::new(MazeErrorType::CreationError(
+                "cannot add bot: maze has no start cells".to_string(),
+            )));
+        }
+        let id = self.locs.len();
+        let loc = self.starts[id % self.starts.len()];
+        self.locs.push(loc);
+        self.occupied.insert(loc);
+        Ok(id)
+    }
 
-    fn try_from((value, n_bots): (String, usize)) -> Result<Self, Self::Error> {
-        MultiTextMaze::try_from((value.as_str(), n_bots))
+    fn has_bot(&self, id: usize) -> bool {
+        id < self.locs.len()
+    }
+
+    fn bot_ids(&self) -> Vec<usize> {
+        (0..self.locs.len()).collect()
     }
 }
 
-impl TryFrom<(&str, usize)> for MultiTextMaze {
+impl TryFrom<String> for MultiTextMaze {
     type Error = MazeError;
 
-    fn try_from((value, n_bots): (&str, usize)) -> Result<Self, Self::Error> {
-        if n_bots == 0 {
-            return Err(MazeError::new(MazeErrorType::CreationError(String::from(
-                "n_bots must be >= 1",
-            ))));
-        }
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        MultiTextMaze::try_from(value.as_str())
+    }
+}
 
+impl TryFrom<&str> for MultiTextMaze {
+    type Error = MazeError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         let (chars, starts, maybe_width) =
             value
                 .chars()
@@ -171,13 +189,11 @@ impl TryFrom<(&str, usize)> for MultiTextMaze {
             )))),
         }?;
 
-        let locs: Vec<usize> = (0..n_bots).map(|i| starts[i % starts.len()]).collect();
-        let occupied: HashSet<usize> = locs.iter().cloned().collect();
-
         Ok(MultiTextMaze {
             chars,
-            locs,
-            occupied,
+            starts,
+            locs: vec![],
+            occupied: HashSet::new(),
             width,
         })
     }
@@ -222,7 +238,49 @@ mod tests {
     const BOTR_MAZE: &str = "++\n+S";
 
     fn make_maze(s: &str, n: usize) -> MultiTextMaze {
-        MultiTextMaze::try_from((s, n)).expect("maze to create successfully")
+        let mut maze = MultiTextMaze::try_from(s).expect("maze to create successfully");
+        for _ in 0..n {
+            maze.add_bot().expect("add_bot to succeed");
+        }
+        maze
+    }
+
+    // --- add_bot / has_bot / bot_ids ---
+
+    #[test]
+    fn add_bot_returns_sequential_ids() {
+        let mut maze = MultiTextMaze::try_from("S S").expect("created");
+        assert_eq!(maze.add_bot().unwrap(), 0);
+        assert_eq!(maze.add_bot().unwrap(), 1);
+        assert_eq!(maze.add_bot().unwrap(), 2);
+    }
+
+    #[test]
+    fn add_bot_rotates_through_starts() {
+        // "S S": starts at indices 0 and 2
+        let mut maze = MultiTextMaze::try_from("S S").expect("created");
+        maze.add_bot().unwrap(); // id 0 → start[0] = 0
+        maze.add_bot().unwrap(); // id 1 → start[1] = 2
+        maze.add_bot().unwrap(); // id 2 → start[0] = 0 (round-robin)
+        assert_eq!(maze.locs, vec![0, 2, 0]);
+    }
+
+    #[test]
+    fn has_bot_true_for_added_false_otherwise() {
+        let mut maze = MultiTextMaze::try_from("S").expect("created");
+        assert!(!maze.has_bot(0));
+        maze.add_bot().unwrap();
+        assert!(maze.has_bot(0));
+        assert!(!maze.has_bot(1));
+    }
+
+    #[test]
+    fn bot_ids_returns_added_ids() {
+        let mut maze = MultiTextMaze::try_from("SS").expect("created");
+        assert!(maze.bot_ids().is_empty());
+        maze.add_bot().unwrap();
+        maze.add_bot().unwrap();
+        assert_eq!(maze.bot_ids(), vec![0, 1]);
     }
 
     // --- single-bot parity ---

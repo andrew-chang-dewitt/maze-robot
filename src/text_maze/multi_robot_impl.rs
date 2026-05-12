@@ -10,7 +10,10 @@ pub struct MultiTextRobot(RobotInternal);
 
 impl MultiTextRobot {
     pub fn swarm(text: &str, n: usize) -> Result<Vec<Self>, MazeError> {
-        let maze = MultiTextMaze::try_from((text, n))?;
+        let mut maze = MultiTextMaze::try_from(text)?;
+        for _ in 0..n {
+            maze.add_bot()?;
+        }
         let shared: Rc<RefCell<Box<dyn MultiMaze>>> = Rc::new(RefCell::new(Box::new(maze)));
 
         let robots = (0..n)

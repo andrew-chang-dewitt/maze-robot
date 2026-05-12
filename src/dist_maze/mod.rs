@@ -24,22 +24,20 @@ mod integration_tests {
     // Only open path from start: E→idx7, then S→idx13, E→14, E→15, N→9; peek E at idx9 → Finish.
     const MAZE: &str = "+++++\nS + F\n+   +\n+++++";
 
-    // Creates a fresh MultiTextMaze server with one registered bot and a connected DistRobot.
-    // Spawns the server on a background thread (runs until the robot's connection closes).
+    // Creates a fresh MultiTextMaze server and a connected DistRobot.
+    // Server is spawned first so it can accept; bot auto-registers on first connect.
     fn setup() -> DistRobot {
-        let maze = MultiTextMaze::try_from((MAZE, 1)).expect("maze created");
+        let maze = MultiTextMaze::try_from(MAZE).expect("maze created");
         let mut server = DistMazeServer::try_from((
             maze,
             "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
         ))
         .expect("server created");
         let server_addr = server.local_addr().unwrap();
-        let robot = DistRobot::try_build(server_addr).expect("robot connects");
-        server.register_bot(robot.local_addr(), 0);
         thread::spawn(move || {
             server.start().ok();
         });
-        robot
+        DistRobot::try_build(server_addr).expect("robot connects")
     }
 
     #[test]

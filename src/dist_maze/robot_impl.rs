@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use crate::{
     dist_maze::DistMazeClient,
-    traits::{MazeError, MazeErrorType, Robot, RobotInternal},
+    traits::{MazeError, Robot, RobotInternal},
 };
 
 use super::swarm::Swarm;
@@ -13,32 +13,20 @@ use super::swarm::Swarm;
 #[derive(Debug)]
 pub struct DistRobot {
     env: RobotInternal,
-    local_addr: SocketAddr,
     // swarm: Swarm,
 }
 
 impl DistRobot {
     /// Create a new distributed robot by telling it at what address to find the distributed maze.
     ///
-    /// Initializes a DistMazeClient connects it to the DistMazeServer at the address provided.
+    /// Initializes a DistMazeClient and connects it to the DistMazeServer at the address provided.
+    /// The server will auto-register this bot on first contact.
     pub fn try_build(maze_addr: SocketAddr) -> Result<Self, MazeError> {
         let maze = DistMazeClient::try_from(maze_addr)?;
-        let local_addr = maze.local_addr().map_err(|e| {
-            MazeError::new(MazeErrorType::CreationError(e.to_string())).caused_by(e)
-        })?;
         Ok(Self {
             env: RobotInternal::new(maze),
-            local_addr,
             // swarm: Swarm::new(),
         })
-    }
-
-    /// Returns the local socket address of the underlying connection to the maze server.
-    ///
-    /// Use this to register the robot with a [`crate::dist_maze::DistMazeServer`] via
-    /// [`crate::dist_maze::DistMazeServer::register_bot`] before starting the server.
-    pub fn local_addr(&self) -> SocketAddr {
-        self.local_addr
     }
 
     // /// Initialize Swarm connection (UdpSockets)

@@ -6,7 +6,7 @@ use std::{
     fs::read_to_string,
 };
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use clap::Parser;
 
 use maze_robot::{Cell, DIR_ARR, Direction, new_bot, text_maze::TextRobot, traits::Robot};

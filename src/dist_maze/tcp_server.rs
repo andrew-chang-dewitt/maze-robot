@@ -15,6 +15,10 @@ impl TcpServer {
         self.listener.local_addr()
     }
 
+    // FIXME: serial connection handling — the outer `for stream in incoming()` plus the inner
+    // per-stream `loop` means only one client is serviced at a time; subsequent accept()s block
+    // until the active stream EOFs. Acceptable for single-bot dev, not for a swarm. Revisit with
+    // per-connection threads (Arc<Mutex<...>> on shared state) or async I/O.
     pub fn start<'a, T, R, E, F, const N: usize>(&self, mut handler: F) -> Result<(), io::Error>
     where
         E: Into<io::Error>,

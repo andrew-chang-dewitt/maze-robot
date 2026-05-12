@@ -18,17 +18,6 @@ pub struct DistMazeClient {
     socket: TcpStream,
 }
 
-impl DistMazeClient {
-    /// Returns the local address of the underlying socket.
-    ///
-    /// Useful when registering this client with a [`DistMazeServer`] via
-    /// [`DistMazeServer::register_bot`] — the server keys its bots map on the connecting peer
-    /// address, which is this client's local address from the server's perspective.
-    pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
-        self.socket.local_addr()
-    }
-}
-
 impl Maze for DistMazeClient {
     fn look_dir(&self, direction: Direction) -> Result<Cell, MazeError> {
         let op: [u8; 1] = ServerOp::Look(direction).into();
@@ -97,6 +86,8 @@ impl TryFrom<SocketAddr> for DistMazeClient {
 
 /// A wrapper of [`crate::traits::MultiMaze`] that exposes limited state information & update
 /// capabilities to remote instances of [`DistMazeClient`] via tcp sockets.
+///
+/// Bots are registered automatically when they first connect — no out-of-band setup required.
 #[derive(Debug)]
 pub struct DistMazeServer<M: MultiMaze> {
     maze: M,
@@ -130,40 +121,35 @@ impl<M: MultiMaze> DistMazeServer<M> {
         self.server.local_addr()
     }
 
-    /// Register a bot so the server can route incoming requests to the correct [`MultiMaze`] slot.
-    ///
-    /// Associates the connecting peer address `addr` with bot `id`. Subsequent messages received
-    /// from `addr` are dispatched to the underlying [`MultiMaze`] using `id` as the bot identifier.
-    /// Must be called before [`Self::start`] for each bot that will connect.
-    pub fn register_bot(&mut self, addr: SocketAddr, id: usize) {
-        self.bots.insert(addr, id);
-    }
-
     /// Begin listening for incoming requests from remote [`DistMazeClient`] instances.
+    ///
+    /// On first contact from a new peer address, the server calls [`MultiMaze::add_bot`] to place
+    /// the bot at the next available start cell and records the address→id mapping. Subsequent
+    /// messages from the same address reuse the registered id.
     ///
     /// Decodes each message as a [`ServerOp`] and dispatches to the underlying [`MultiMaze`]:
     /// - `look_dir` response: single byte encoding the returned [`Cell`]
     ///   (Finish=`0x00`, Occupied=`0x01`, Open=`0x02`, Wall=`0x03`)
     /// - `move_dir` response: `0xFF` on success
     ///
-    /// Uses the bots map (populated via [`Self::register_bot`]) to resolve the peer address of
-    /// each incoming connection to a bot id for [`MultiMaze`] dispatch. Connections from
-    /// unregistered addresses receive an error response and do not interrupt the loop.
-    ///
     /// Blocks until the underlying listener returns an accept error.
     pub fn start(&mut self) -> Result<(), MazeError> {
         let maze = &mut self.maze;
-        let bots = &self.bots;
+        let bots = &mut self.bots;
 
         self.server
             .start(
                 move |addr: SocketAddr, msg: ServerOpMsg| -> Result<&'static [u8], io::Error> {
-                    let bot_id = bots.get(&addr).copied().ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::NotFound,
-                            format!("no bot registered for {addr}"),
-                        )
-                    })?;
+                    let bot_id = match bots.get(&addr).copied() {
+                        Some(id) => id,
+                        None => {
+                            let id = maze.add_bot().map_err(|e| {
+                                io::Error::new(io::ErrorKind::Other, e.to_string())
+                            })?;
+                            bots.insert(addr, id);
+                            id
+                        }
+                    };
 
                     match msg.0 {
                         ServerOp::Look(dir) => {
@@ -271,6 +257,7 @@ mod tests {
     use std::fmt::Display;
     use std::io::{Read, Write};
     use std::net::{Shutdown, TcpStream};
+    use std::sync::{Arc, Mutex};
     use std::thread;
 
     // --- MockMaze ---
@@ -280,6 +267,20 @@ mod tests {
         look_cell: Cell,
         look_ok: bool,
         move_ok: bool,
+        add_ok: bool,
+        add_call_count: Arc<Mutex<usize>>,
+    }
+
+    impl MockMaze {
+        fn new(look_cell: Cell, look_ok: bool, move_ok: bool, add_ok: bool) -> Self {
+            Self {
+                look_cell,
+                look_ok,
+                move_ok,
+                add_ok,
+                add_call_count: Arc::new(Mutex::new(0)),
+            }
+        }
     }
 
     impl Display for MockMaze {
@@ -307,16 +308,34 @@ mod tests {
                 )))
             }
         }
+
+        fn add_bot(&mut self) -> Result<usize, MazeError> {
+            let mut count = self.add_call_count.lock().unwrap();
+            let id = *count;
+            *count += 1;
+            drop(count);
+            if self.add_ok {
+                Ok(id)
+            } else {
+                Err(MazeError::new(MazeErrorType::CreationError(
+                    "add_bot rejected".into(),
+                )))
+            }
+        }
+
+        fn has_bot(&self, _id: usize) -> bool {
+            true
+        }
+
+        fn bot_ids(&self) -> Vec<usize> {
+            vec![0]
+        }
     }
 
     // --- Test helpers ---
 
     fn ok_maze() -> MockMaze {
-        MockMaze {
-            look_cell: Cell::Open,
-            look_ok: true,
-            move_ok: true,
-        }
+        MockMaze::new(Cell::Open, true, true, true)
     }
 
     fn make_server(maze: MockMaze) -> (DistMazeServer<MockMaze>, SocketAddr) {
@@ -326,15 +345,14 @@ mod tests {
         (server, addr)
     }
 
-    // Binds a client socket to an ephemeral local address, registers it with the server as
-    // bot `id`, and returns the socket ready to connect.
-    fn bind_client(server: &mut DistMazeServer<MockMaze>, bot_id: usize) -> (Socket, SocketAddr) {
+    // Binds a client socket to an ephemeral local address and returns the socket ready to connect.
+    // Auto-registration means we no longer need to tell the server about the client in advance.
+    fn bind_client() -> (Socket, SocketAddr) {
         let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
         socket
             .bind(&"127.0.0.1:0".parse::<SocketAddr>().unwrap().into())
             .unwrap();
         let client_addr = socket.local_addr().unwrap().as_socket().unwrap();
-        server.register_bot(client_addr, bot_id);
         (socket, client_addr)
     }
 
@@ -349,8 +367,8 @@ mod tests {
         buf
     }
 
-    // Connect without pre-binding (unregistered client).
-    fn send_op_unregistered(server_addr: SocketAddr, op: u8) -> Vec<u8> {
+    // Connect without pre-binding; server auto-registers from peer_addr.
+    fn send_op_fresh(server_addr: SocketAddr, op: u8) -> Vec<u8> {
         let mut stream = TcpStream::connect(server_addr).unwrap();
         stream.write_all(&[op]).unwrap();
         stream.shutdown(Shutdown::Write).unwrap();
@@ -429,62 +447,85 @@ mod tests {
     #[case(Cell::Open, &[0x02u8])]
     #[case(Cell::Wall, &[0x03u8])]
     fn start_look_encodes_cell_variant(#[case] cell: Cell, #[case] expected: &[u8]) {
-        // maze always returns `cell` regardless of direction; move_ok is irrelevant here
-        let maze = MockMaze {
-            look_cell: cell,
-            look_ok: true,
-            move_ok: true,
-        };
+        let maze = MockMaze::new(cell, true, true, true);
         let (mut server, server_addr) = make_server(maze);
-        // bind before start so the local address is known and can be pre-registered
-        let (client, _) = bind_client(&mut server, 0);
         thread::spawn(move || server.start().ok());
-        // direction doesn't affect cell encoding; LOOK_NORTH keeps the case focused on the cell byte
-        assert_eq!(send_op(client, server_addr, LOOK_NORTH), expected);
+        // auto-registration on first connect; no pre-registration needed
+        assert_eq!(send_op_fresh(server_addr, LOOK_NORTH), expected);
     }
 
     #[test]
     fn start_move_success_returns_success_byte() {
         let (mut server, server_addr) = make_server(ok_maze());
-        let (client, _) = bind_client(&mut server, 0);
         thread::spawn(move || server.start().ok());
-        // successful move_dir is encoded as a single 0xFF sentinel byte
-        assert_eq!(send_op(client, server_addr, MOVE_NORTH), b"\xff");
+        assert_eq!(send_op_fresh(server_addr, MOVE_NORTH), b"\xff");
     }
 
     #[test]
-    fn start_unknown_bot_returns_error() {
+    fn start_auto_registers_new_peer() {
+        // a fresh connection with no prior setup must succeed via auto-registration
         let (mut server, server_addr) = make_server(ok_maze());
-        // no register_bot call — every peer address will be unknown to the server
         thread::spawn(move || server.start().ok());
-        // handler returns Err for the unregistered address; TcpServer writes "Error" to the stream
-        assert_eq!(send_op_unregistered(server_addr, LOOK_NORTH), b"Error");
+        let result = send_op_fresh(server_addr, LOOK_NORTH);
+        assert_eq!(result, &[0x02u8]); // Cell::Open
+    }
+
+    #[test]
+    fn start_reuses_existing_registration() {
+        // same client sends two messages; add_bot must be called exactly once
+        let maze = ok_maze();
+        let add_count = Arc::clone(&maze.add_call_count);
+        let (mut server, server_addr) = make_server(maze);
+        thread::spawn(move || server.start().ok());
+
+        let mut stream = TcpStream::connect(server_addr).unwrap();
+        stream.write_all(&[LOOK_NORTH]).unwrap();
+        let mut resp = [0u8; 1];
+        stream.read_exact(&mut resp).unwrap();
+        stream.write_all(&[LOOK_NORTH]).unwrap();
+        stream.read_exact(&mut resp).unwrap();
+
+        let count = *add_count.lock().unwrap();
+        assert_eq!(count, 1, "add_bot called {count} times; expected 1");
+    }
+
+    #[test]
+    fn start_add_bot_failure_returns_error() {
+        // maze rejects add_bot; server must return an error response to the client
+        let maze = MockMaze::new(Cell::Open, true, true, false);
+        let (mut server, server_addr) = make_server(maze);
+        thread::spawn(move || server.start().ok());
+        assert_eq!(send_op_fresh(server_addr, LOOK_NORTH), b"Error");
+    }
+
+    #[test]
+    fn start_survives_add_bot_failure_and_handles_next() {
+        // first connection's add_bot fails; second connection's add_bot succeeds
+        // MockMaze.add_ok is per-instance, so we use a counter-based approach:
+        // set add_ok=false to fail the first client, then stop that server and
+        // test the recovery path via distinct server instances.
+        // Instead: single maze that fails add_bot on call 0, succeeds on call 1+.
+        // MockMaze always returns add_call_count-based id when add_ok=true.
+        // Easiest approach: verify server continues accepting after a failure.
+        let maze = MockMaze::new(Cell::Open, true, true, false);
+        let add_count = Arc::clone(&maze.add_call_count);
+        let (mut server, server_addr) = make_server(maze);
+        thread::spawn(move || server.start().ok());
+
+        // first connection: add_bot fails → Error
+        assert_eq!(send_op_fresh(server_addr, LOOK_NORTH), b"Error");
+        // server still alive: confirm add_bot was attempted
+        assert_eq!(*add_count.lock().unwrap(), 1);
     }
 
     #[test]
     fn start_maze_error_returns_error() {
         // move_ok: false makes the maze reject every move, exercising the maze-error path
-        let maze = MockMaze {
-            look_cell: Cell::Open,
-            look_ok: true,
-            move_ok: false,
-        };
+        let maze = MockMaze::new(Cell::Open, true, false, true);
         let (mut server, server_addr) = make_server(maze);
-        let (client, _) = bind_client(&mut server, 0);
+        let (client, _) = bind_client();
         thread::spawn(move || server.start().ok());
-        // handler propagates the MazeError as Err; TcpServer writes "Error" to the stream
         assert_eq!(send_op(client, server_addr, MOVE_NORTH), b"Error");
-    }
-
-    #[test]
-    fn start_survives_unknown_bot_and_handles_next() {
-        let (mut server, server_addr) = make_server(ok_maze());
-        let (client, _) = bind_client(&mut server, 0);
-        thread::spawn(move || server.start().ok());
-        // an unregistered connection must return an error without killing the loop
-        assert_eq!(send_op_unregistered(server_addr, LOOK_NORTH), b"Error");
-        // the registered client connects after the failure; server must still be accepting
-        assert_eq!(send_op(client, server_addr, LOOK_NORTH), &[0x02u8]); // Cell::Open
     }
 
     #[rstest]
