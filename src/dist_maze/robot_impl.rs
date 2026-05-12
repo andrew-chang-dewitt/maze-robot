@@ -1,8 +1,10 @@
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
+use socket2::{Domain, Protocol, Socket, Type};
 
 use crate::{
     dist_maze::DistMazeClient,
-    traits::{MazeError, Robot, RobotInternal},
+    traits::{MazeError, Robot, RobotError, RobotErrorType, RobotInternal},
 };
 
 use super::swarm::Swarm;
@@ -10,10 +12,13 @@ use super::swarm::Swarm;
 /// Implementation of [`crate::traits::Robot`] that queries maze environment (an instance of
 /// [`crate::dist_maze::DistMazeServer`]) via tcp sockets using internal
 /// [`crate::dist_maze::DistMazeClient`] instance.
+///
+/// Optionally joins a UDP-broadcast swarm transport via [`Self::join_swarm`] for inter-robot
+/// messaging.
 #[derive(Debug)]
 pub struct DistRobot {
     env: RobotInternal,
-    // swarm: Swarm,
+    swarm: Option<Swarm>,
 }
 
 impl DistRobot {
@@ -25,19 +30,106 @@ impl DistRobot {
         let maze = DistMazeClient::try_from(maze_addr)?;
         Ok(Self {
             env: RobotInternal::new(maze),
-            // swarm: Swarm::new(),
+            swarm: None,
         })
     }
 
-    // /// Initialize Swarm connection (UdpSockets)
-    // pub fn swarm_join(&mut self) {
-    //     todo!()
-    // }
+    /// Attach a UDP broadcast swarm transport to this robot for the standard one-bot-per-host
+    /// deployment.
+    ///
+    /// Binds a non-blocking UDP socket to `0.0.0.0:port` with `SO_BROADCAST` enabled and sends
+    /// every outbound message to the limited-broadcast address `255.255.255.255:port`, which
+    /// reaches all peers on the local subnet via the wire-facing interface.
+    ///
+    /// **Not suitable for multiple robots in one process** — Linux does not deliver limited
+    /// broadcasts back to local sockets on the same host. Use [`Self::join_swarm_local`] for
+    /// same-host deployments and tests.
+    pub fn join_swarm(self, port: u16) -> Result<Self, RobotError> {
+        self.join_swarm_inner(port, false)
+    }
 
-    // /// Shutdown Swarm connection
-    // pub fn swarm_leave(&mut self) {
-    //     todo!()
-    // }
+    /// Attach a UDP broadcast swarm transport configured for multiple robots running on a single
+    /// host (e.g. tests, demos).
+    ///
+    /// Binds a non-blocking UDP socket to `0.0.0.0:port` with `SO_REUSEADDR` + `SO_REUSEPORT` so
+    /// multiple in-process robots can share the port, and broadcasts to the loopback-subnet
+    /// broadcast address `127.255.255.255:port` so the kernel delivers packets via `lo` to every
+    /// peer bound on the same port.
+    pub fn join_swarm_local(self, port: u16) -> Result<Self, RobotError> {
+        self.join_swarm_inner(port, true)
+    }
+
+    fn join_swarm_inner(mut self, port: u16, local: bool) -> Result<Self, RobotError> {
+        let sock = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
+            .map_err(|e| transport_err("create socket", e))?;
+        if local {
+            sock.set_reuse_address(true)
+                .map_err(|e| transport_err("set SO_REUSEADDR", e))?;
+            sock.set_reuse_port(true)
+                .map_err(|e| transport_err("set SO_REUSEPORT", e))?;
+        }
+        sock.set_broadcast(true)
+            .map_err(|e| transport_err("set SO_BROADCAST", e))?;
+        sock.set_nonblocking(true)
+            .map_err(|e| transport_err("set non-blocking", e))?;
+        let bind = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
+        sock.bind(&SocketAddr::V4(bind).into())
+            .map_err(|e| transport_err(&format!("bind {bind}"), e))?;
+        let bcast = if local {
+            Ipv4Addr::new(127, 255, 255, 255)
+        } else {
+            Ipv4Addr::BROADCAST
+        };
+        let target = SocketAddr::V4(SocketAddrV4::new(bcast, port));
+        self.swarm = Some(Swarm::new(sock.into(), target));
+        Ok(self)
+    }
+
+    /// Send a message to all peer robots via the swarm broadcast.
+    ///
+    /// The message is encoded into bytes via the user-provided `TryInto<Vec<u8>>` impl, then
+    /// broadcast to `255.255.255.255:port`. Returns `RobotError::NotJoined` if `join_swarm`
+    /// has not been called.
+    pub fn send<T>(&self, msg: T) -> Result<(), RobotError>
+    where
+        T: TryInto<Vec<u8>>,
+        T::Error: std::error::Error + Send + Sync + 'static,
+    {
+        let swarm = self
+            .swarm
+            .as_ref()
+            .ok_or_else(|| RobotError::new(RobotErrorType::NotJoined))?;
+        let payload: Vec<u8> = msg.try_into().map_err(|e| {
+            RobotError::new(RobotErrorType::EncodeError(e.to_string())).caused_by(e)
+        })?;
+        swarm
+            .send_raw(&payload)
+            .map_err(|e| transport_err("send", e))
+    }
+
+    /// Fetch the next unprocessed message from the swarm. Non-blocking: returns `Ok(None)` when
+    /// no message is currently waiting. The payload is decoded into `T` via the user-provided
+    /// `TryFrom<Vec<u8>>` impl. Messages this robot sent are dropped (the user never sees them).
+    pub fn try_recv<T>(&self) -> Result<Option<T>, RobotError>
+    where
+        T: TryFrom<Vec<u8>>,
+        T::Error: std::error::Error + Send + Sync + 'static,
+    {
+        let swarm = self
+            .swarm
+            .as_ref()
+            .ok_or_else(|| RobotError::new(RobotErrorType::NotJoined))?;
+        match swarm.try_recv_raw().map_err(|e| transport_err("recv", e))? {
+            None => Ok(None),
+            Some(bytes) => T::try_from(bytes).map(Some).map_err(|e| {
+                RobotError::new(RobotErrorType::DecodeError(e.to_string())).caused_by(e)
+            }),
+        }
+    }
+}
+
+fn transport_err(stage: &str, err: std::io::Error) -> RobotError {
+    RobotError::new(RobotErrorType::TransportError(format!("{stage}: {err}"))).caused_by(err)
 }
 
 impl Robot for DistRobot {
@@ -141,5 +233,146 @@ mod tests {
         // 'E' (0x45, first byte of "Error") is not 0xFF; client returns Err, robot propagates it
         let robot = make_robot(one_shot_mock(b"E"));
         assert!(robot.go(Direction::North).is_err());
+    }
+
+    // --- swarm tests ---
+    mod swarm {
+        use super::*;
+        use std::convert::Infallible;
+        use std::sync::atomic::{AtomicU16, Ordering};
+        use std::time::{Duration, Instant};
+
+        // Each test claims a unique port so concurrent runs and stale packets from prior tests
+        // can't bleed across. Starts well above the ephemeral range used by `one_shot_mock`.
+        static NEXT_PORT: AtomicU16 = AtomicU16::new(49500);
+        fn next_port() -> u16 {
+            NEXT_PORT.fetch_add(1, Ordering::SeqCst)
+        }
+
+        // Build a robot with both the (dummy) maze TCP server and the swarm transport ready. The
+        // maze mock just parks the connection — swarm tests never exercise peek/go.
+        fn make_swarm_robot(port: u16) -> DistRobot {
+            DistRobot::try_build(one_shot_mock(b"\x02"))
+                .expect("robot connects to maze mock")
+                .join_swarm_local(port)
+                .expect("robot joins swarm")
+        }
+
+        // Simple String<->Vec<u8> codec via TryFrom/TryInto, used by every test.
+        #[derive(Debug, Clone, PartialEq)]
+        struct Msg(String);
+
+        impl TryFrom<Vec<u8>> for Msg {
+            type Error = std::string::FromUtf8Error;
+            fn try_from(v: Vec<u8>) -> Result<Self, Self::Error> {
+                String::from_utf8(v).map(Msg)
+            }
+        }
+
+        impl TryFrom<Msg> for Vec<u8> {
+            type Error = Infallible;
+            fn try_from(m: Msg) -> Result<Self, Self::Error> {
+                Ok(m.0.into_bytes())
+            }
+        }
+
+        // Pull every available Msg off `r` for at most `total`, returning the strings received.
+        fn drain(r: &DistRobot, total: Duration) -> Vec<String> {
+            let deadline = Instant::now() + total;
+            let mut out = Vec::new();
+            while Instant::now() < deadline {
+                match r.try_recv::<Msg>() {
+                    Ok(Some(m)) => out.push(m.0),
+                    Ok(None) => thread::sleep(Duration::from_millis(5)),
+                    Err(e) => panic!("try_recv failed: {e}"),
+                }
+            }
+            out
+        }
+
+        #[test]
+        fn two_robots_exchange_messages() {
+            // Two robots on the same port should each receive the other's broadcast — and never
+            // their own.
+            let port = next_port();
+            let a = make_swarm_robot(port);
+            let b = make_swarm_robot(port);
+
+            a.send(Msg("from-a".into())).expect("a sends");
+            b.send(Msg("from-b".into())).expect("b sends");
+
+            let ra = drain(&a, Duration::from_millis(200));
+            let rb = drain(&b, Duration::from_millis(200));
+
+            assert!(
+                ra.contains(&"from-b".to_string()),
+                "a missing b's msg: {ra:?}"
+            );
+            assert!(
+                rb.contains(&"from-a".to_string()),
+                "b missing a's msg: {rb:?}"
+            );
+            assert!(!ra.contains(&"from-a".to_string()), "a saw own msg: {ra:?}");
+            assert!(!rb.contains(&"from-b".to_string()), "b saw own msg: {rb:?}");
+        }
+
+        #[test]
+        fn three_robots_each_receive_others_messages() {
+            // All three on the same port; each one's broadcast must reach the other two and not
+            // itself.
+            let port = next_port();
+            let a = make_swarm_robot(port);
+            let b = make_swarm_robot(port);
+            let c = make_swarm_robot(port);
+
+            a.send(Msg("from-a".into())).unwrap();
+            b.send(Msg("from-b".into())).unwrap();
+            c.send(Msg("from-c".into())).unwrap();
+
+            let ra = drain(&a, Duration::from_millis(200));
+            let rb = drain(&b, Duration::from_millis(200));
+            let rc = drain(&c, Duration::from_millis(200));
+
+            for (name, recv, own) in [
+                ("a", &ra, "from-a"),
+                ("b", &rb, "from-b"),
+                ("c", &rc, "from-c"),
+            ] {
+                assert!(
+                    !recv.contains(&own.to_string()),
+                    "{name} saw own msg ({own}): {recv:?}"
+                );
+                for other in ["from-a", "from-b", "from-c"].iter().filter(|m| **m != own) {
+                    assert!(
+                        recv.contains(&other.to_string()),
+                        "{name} missing {other}: {recv:?}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn try_recv_returns_none_when_no_messages_waiting() {
+            // Fresh robot with no senders: try_recv must yield Ok(None), not block or error.
+            let port = next_port();
+            let a = make_swarm_robot(port);
+            assert!(matches!(a.try_recv::<Msg>(), Ok(None)));
+        }
+
+        #[test]
+        fn send_without_join_swarm_returns_not_joined() {
+            // join_swarm was never called; send must surface NotJoined.
+            let r = make_robot(one_shot_mock(b"\x02"));
+            let err = r.send(Msg("x".into())).expect_err("send must fail");
+            assert!(matches!(err.get_type(), RobotErrorType::NotJoined));
+        }
+
+        #[test]
+        fn try_recv_without_join_swarm_returns_not_joined() {
+            // join_swarm was never called; try_recv must surface NotJoined.
+            let r = make_robot(one_shot_mock(b"\x02"));
+            let err = r.try_recv::<Msg>().expect_err("try_recv must fail");
+            assert!(matches!(err.get_type(), RobotErrorType::NotJoined));
+        }
     }
 }
