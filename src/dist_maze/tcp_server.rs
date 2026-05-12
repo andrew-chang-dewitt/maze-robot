@@ -11,6 +11,10 @@ impl TcpServer {
         Self { listener }
     }
 
+    pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
+        self.listener.local_addr()
+    }
+
     pub fn start<'a, T, R, E, F, const N: usize>(&self, mut handler: F) -> Result<(), io::Error>
     where
         E: Into<io::Error>,

@@ -11,6 +11,9 @@ anyhow = "1.0.100"
 clap = { version = "4.5.49", features = ["derive"] }
 rstest = "0.26.1"
 
+[dev-dependencies]
+socket2 = "0.5"
+
 [[example]]
 name = "text-dfs"
 path = "examples/text_dfs.rs"
