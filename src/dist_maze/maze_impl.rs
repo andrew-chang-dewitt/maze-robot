@@ -3,6 +3,7 @@ use std::{
     fmt::Display,
     io::{self, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
+    thread,
 };
 
 use crate::{
@@ -121,23 +122,17 @@ impl<M: MultiMaze> DistMazeServer<M> {
         self.server.local_addr()
     }
 
-    /// Begin listening for incoming requests from remote [`DistMazeClient`] instances.
+    /// Runs the server's accept/dispatch loop on the current thread. Consumes `self`.
     ///
-    /// On first contact from a new peer address, the server calls [`MultiMaze::add_bot`] to place
-    /// the bot at the next available start cell and records the address→id mapping. Subsequent
-    /// messages from the same address reuse the registered id.
-    ///
-    /// Decodes each message as a [`ServerOp`] and dispatches to the underlying [`MultiMaze`]:
-    /// - `look_dir` response: single byte encoding the returned [`Cell`]
-    ///   (Finish=`0x00`, Occupied=`0x01`, Open=`0x02`, Wall=`0x03`)
-    /// - `move_dir` response: `0xFF` on success
-    ///
-    /// Blocks until the underlying listener returns an accept error.
-    pub fn start(&mut self) -> Result<(), MazeError> {
-        let maze = &mut self.maze;
-        let bots = &mut self.bots;
+    /// Used internally by [`Self::start`] inside the spawned thread; not part of the public API.
+    fn run(self) -> Result<(), MazeError> {
+        let DistMazeServer {
+            mut maze,
+            mut bots,
+            server,
+        } = self;
 
-        self.server
+        server
             .start(
                 move |addr: SocketAddr, msg: ServerOpMsg| -> Result<&'static [u8], io::Error> {
                     let bot_id = match bots.get(&addr).copied() {
@@ -176,6 +171,72 @@ impl<M: MultiMaze> DistMazeServer<M> {
                 MazeError::new(MazeErrorType::CreationError(msg)).caused_by(e)
             })
     }
+}
+
+impl<M: MultiMaze + Send + 'static> DistMazeServer<M> {
+    /// Spawns the server's accept/dispatch loop in a new thread and returns a one-shot shutdown
+    /// closure. Consumes `self` — the server can only be started once.
+    ///
+    /// On first contact from a new peer address, the server calls [`MultiMaze::add_bot`] to place
+    /// the bot at the next available start cell and records the address→id mapping. Subsequent
+    /// messages from the same address reuse the registered id.
+    ///
+    /// Message dispatch:
+    /// - `look_dir` response: single byte encoding the returned [`Cell`]
+    ///   (Finish=`0x00`, Occupied=`0x01`, Open=`0x02`, Wall=`0x03`)
+    /// - `move_dir` response: `0xFF` on success
+    ///
+    /// The returned closure, when called, signals the server to stop and joins the worker thread.
+    /// It returns the worker thread's final `Result`, with any join panic folded into a
+    /// `MazeError::CreationError`. Dropping the closure without calling it detaches the worker
+    /// thread (it will keep running until the process exits).
+    ///
+    /// # Ordering note
+    ///
+    /// Active client connections must be closed by their peers *before* the shutdown closure is
+    /// invoked, otherwise the server thread will remain parked inside the per-stream read loop
+    /// and the join will block.
+    pub fn start(self) -> Result<impl FnOnce() -> Result<(), MazeError>, MazeError> {
+        let stop = self.server.stop_signal().map_err(|e| {
+            MazeError::new(MazeErrorType::CreationError(format!(
+                "Unable to obtain stop signal:\n  {e}"
+            )))
+            .caused_by(e)
+        })?;
+
+        let handle = thread::Builder::new()
+            .name("dist-maze-server".to_string())
+            .spawn(move || self.run())
+            .map_err(|e| {
+                MazeError::new(MazeErrorType::CreationError(format!(
+                    "Unable to spawn server thread:\n  {e}"
+                )))
+                .caused_by(e)
+            })?;
+
+        Ok(move || -> Result<(), MazeError> {
+            stop.stop();
+            match handle.join() {
+                Ok(inner) => inner,
+                Err(payload) => {
+                    let msg = panic_payload_to_string(payload);
+                    Err(MazeError::new(MazeErrorType::CreationError(format!(
+                        "server thread panicked: {msg}"
+                    ))))
+                }
+            }
+        })
+    }
+}
+
+fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        return (*s).to_string();
+    }
+    if let Some(s) = payload.downcast_ref::<String>() {
+        return s.clone();
+    }
+    "<non-string panic payload>".to_string()
 }
 
 impl<M: MultiMaze> TryFrom<(M, SocketAddr)> for DistMazeServer<M> {
@@ -448,24 +509,24 @@ mod tests {
     #[case(Cell::Wall, &[0x03u8])]
     fn start_look_encodes_cell_variant(#[case] cell: Cell, #[case] expected: &[u8]) {
         let maze = MockMaze::new(cell, true, true, true);
-        let (mut server, server_addr) = make_server(maze);
-        thread::spawn(move || server.start().ok());
+        let (server, server_addr) = make_server(maze);
+        let _shutdown = server.start().expect("server starts");
         // auto-registration on first connect; no pre-registration needed
         assert_eq!(send_op_fresh(server_addr, LOOK_NORTH), expected);
     }
 
     #[test]
     fn start_move_success_returns_success_byte() {
-        let (mut server, server_addr) = make_server(ok_maze());
-        thread::spawn(move || server.start().ok());
+        let (server, server_addr) = make_server(ok_maze());
+        let _shutdown = server.start().expect("server starts");
         assert_eq!(send_op_fresh(server_addr, MOVE_NORTH), b"\xff");
     }
 
     #[test]
     fn start_auto_registers_new_peer() {
         // a fresh connection with no prior setup must succeed via auto-registration
-        let (mut server, server_addr) = make_server(ok_maze());
-        thread::spawn(move || server.start().ok());
+        let (server, server_addr) = make_server(ok_maze());
+        let _shutdown = server.start().expect("server starts");
         let result = send_op_fresh(server_addr, LOOK_NORTH);
         assert_eq!(result, &[0x02u8]); // Cell::Open
     }
@@ -475,8 +536,8 @@ mod tests {
         // same client sends two messages; add_bot must be called exactly once
         let maze = ok_maze();
         let add_count = Arc::clone(&maze.add_call_count);
-        let (mut server, server_addr) = make_server(maze);
-        thread::spawn(move || server.start().ok());
+        let (server, server_addr) = make_server(maze);
+        let _shutdown = server.start().expect("server starts");
 
         let mut stream = TcpStream::connect(server_addr).unwrap();
         stream.write_all(&[LOOK_NORTH]).unwrap();
@@ -493,8 +554,8 @@ mod tests {
     fn start_add_bot_failure_returns_error() {
         // maze rejects add_bot; server must return an error response to the client
         let maze = MockMaze::new(Cell::Open, true, true, false);
-        let (mut server, server_addr) = make_server(maze);
-        thread::spawn(move || server.start().ok());
+        let (server, server_addr) = make_server(maze);
+        let _shutdown = server.start().expect("server starts");
         assert_eq!(send_op_fresh(server_addr, LOOK_NORTH), b"Error");
     }
 
@@ -509,8 +570,8 @@ mod tests {
         // Easiest approach: verify server continues accepting after a failure.
         let maze = MockMaze::new(Cell::Open, true, true, false);
         let add_count = Arc::clone(&maze.add_call_count);
-        let (mut server, server_addr) = make_server(maze);
-        thread::spawn(move || server.start().ok());
+        let (server, server_addr) = make_server(maze);
+        let _shutdown = server.start().expect("server starts");
 
         // first connection: add_bot fails → Error
         assert_eq!(send_op_fresh(server_addr, LOOK_NORTH), b"Error");
@@ -522,9 +583,9 @@ mod tests {
     fn start_maze_error_returns_error() {
         // move_ok: false makes the maze reject every move, exercising the maze-error path
         let maze = MockMaze::new(Cell::Open, true, false, true);
-        let (mut server, server_addr) = make_server(maze);
+        let (server, server_addr) = make_server(maze);
         let (client, _) = bind_client();
-        thread::spawn(move || server.start().ok());
+        let _shutdown = server.start().expect("server starts");
         assert_eq!(send_op(client, server_addr, MOVE_NORTH), b"Error");
     }
 

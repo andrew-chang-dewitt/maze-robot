@@ -9,6 +9,7 @@ verbose = []
 [dependencies]
 anyhow = "1.0.100"
 clap = { version = "4.5.49", features = ["derive"] }
+ctrlc = "3.4"
 rstest = "0.26.1"
 
 [dev-dependencies]

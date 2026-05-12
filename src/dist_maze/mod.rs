@@ -14,7 +14,6 @@ mod integration_tests {
     use crate::text_maze::MultiTextMaze;
     use crate::traits::Robot;
     use std::net::SocketAddr;
-    use std::thread;
 
     //  +++++
     //  S + F
@@ -28,15 +27,15 @@ mod integration_tests {
     // Server is spawned first so it can accept; bot auto-registers on first connect.
     fn setup() -> DistRobot {
         let maze = MultiTextMaze::try_from(MAZE).expect("maze created");
-        let mut server = DistMazeServer::try_from((
+        let server = DistMazeServer::try_from((
             maze,
             "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
         ))
         .expect("server created");
         let server_addr = server.local_addr().unwrap();
-        thread::spawn(move || {
-            server.start().ok();
-        });
+        // start() spawns its own thread and returns a shutdown closure; dropping the closure
+        // detaches the worker thread, which is fine here — the test process exit reaps it.
+        let _shutdown = server.start().expect("server starts");
         DistRobot::try_build(server_addr).expect("robot connects")
     }
 
