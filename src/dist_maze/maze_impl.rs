@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fmt::Display,
-    io,
+    io::{self, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
 };
 
@@ -18,20 +18,66 @@ pub struct DistMazeClient {
     socket: TcpStream,
 }
 
+impl DistMazeClient {
+    /// Returns the local address of the underlying socket.
+    ///
+    /// Useful when registering this client with a [`DistMazeServer`] via
+    /// [`DistMazeServer::register_bot`] — the server keys its bots map on the connecting peer
+    /// address, which is this client's local address from the server's perspective.
+    pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
+        self.socket.local_addr()
+    }
+}
+
 impl Maze for DistMazeClient {
-    fn look_dir(&self, direction: crate::Direction) -> Result<Cell, MazeError> {
-        todo!()
+    fn look_dir(&self, direction: Direction) -> Result<Cell, MazeError> {
+        let op: [u8; 1] = ServerOp::Look(direction).into();
+        (&self.socket).write_all(&op).map_err(io_to_maze_err)?;
+
+        let mut resp = [0u8; 1];
+        (&self.socket)
+            .read_exact(&mut resp)
+            .map_err(io_to_maze_err)?;
+
+        match resp[0] {
+            0x00 => Ok(Cell::Finish),
+            0x01 => Ok(Cell::Occupied),
+            0x02 => Ok(Cell::Open),
+            0x03 => Ok(Cell::Wall),
+            b => Err(MazeError::new(MazeErrorType::CreationError(format!(
+                "unexpected look_dir response byte: {b:#04x}"
+            )))),
+        }
     }
 
-    fn move_dir(&mut self, direction: crate::Direction) -> Result<(), crate::traits::MazeError> {
-        todo!()
+    fn move_dir(&mut self, direction: Direction) -> Result<(), MazeError> {
+        let op: [u8; 1] = ServerOp::Move(direction).into();
+        self.socket.write_all(&op).map_err(io_to_maze_err)?;
+
+        let mut resp = [0u8; 1];
+        self.socket.read_exact(&mut resp).map_err(io_to_maze_err)?;
+
+        match resp[0] {
+            0xFF => Ok(()),
+            _ => Err(MazeError::new(MazeErrorType::MoveError(
+                direction,
+                "server returned error".to_string(),
+            ))),
+        }
     }
 }
 
 impl Display for DistMazeClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self.socket.peer_addr() {
+            Ok(addr) => write!(f, "DistMazeClient({addr})"),
+            Err(_) => write!(f, "DistMazeClient(disconnected)"),
+        }
     }
+}
+
+fn io_to_maze_err(e: io::Error) -> MazeError {
+    MazeError::new(MazeErrorType::CreationError(e.to_string())).caused_by(e)
 }
 
 impl TryFrom<SocketAddr> for DistMazeClient {
@@ -149,8 +195,7 @@ impl<M: MultiMaze> DistMazeServer<M> {
 impl<M: MultiMaze> TryFrom<(M, SocketAddr)> for DistMazeServer<M> {
     type Error = MazeError;
 
-    fn try_from(value: (M, SocketAddr)) -> Result<Self, Self::Error> {
-        let (maze, addr) = value;
+    fn try_from((maze, addr): (M, SocketAddr)) -> Result<Self, Self::Error> {
         let listener = TcpListener::bind(addr).map_err(|e| {
             MazeError::new(MazeErrorType::CreationError(format!(
                 "Unable to configure TCP listener!\n  {e}"
@@ -222,11 +267,11 @@ impl TryFrom<[u8; 1]> for ServerOp {
 mod tests {
     use super::*;
     use rstest::rstest;
+    use socket2::{Domain, Protocol, Socket, Type};
     use std::fmt::Display;
     use std::io::{Read, Write};
     use std::net::{Shutdown, TcpStream};
     use std::thread;
-    use socket2::{Domain, Protocol, Socket, Type};
 
     // --- MockMaze ---
 
@@ -267,15 +312,16 @@ mod tests {
     // --- Test helpers ---
 
     fn ok_maze() -> MockMaze {
-        MockMaze { look_cell: Cell::Open, look_ok: true, move_ok: true }
+        MockMaze {
+            look_cell: Cell::Open,
+            look_ok: true,
+            move_ok: true,
+        }
     }
 
     fn make_server(maze: MockMaze) -> (DistMazeServer<MockMaze>, SocketAddr) {
-        let server = DistMazeServer::try_from((
-            maze,
-            "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
-        ))
-        .unwrap();
+        let server =
+            DistMazeServer::try_from((maze, "127.0.0.1:0".parse::<SocketAddr>().unwrap())).unwrap();
         let addr = server.local_addr().unwrap();
         (server, addr)
     }
@@ -284,7 +330,9 @@ mod tests {
     // bot `id`, and returns the socket ready to connect.
     fn bind_client(server: &mut DistMazeServer<MockMaze>, bot_id: usize) -> (Socket, SocketAddr) {
         let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
-        socket.bind(&"127.0.0.1:0".parse::<SocketAddr>().unwrap().into()).unwrap();
+        socket
+            .bind(&"127.0.0.1:0".parse::<SocketAddr>().unwrap().into())
+            .unwrap();
         let client_addr = socket.local_addr().unwrap().as_socket().unwrap();
         server.register_bot(client_addr, bot_id);
         (socket, client_addr)
@@ -314,6 +362,65 @@ mod tests {
     const LOOK_NORTH: u8 = 0; // ServerOp::Look(North)
     const MOVE_NORTH: u8 = 4; // ServerOp::Move(North)
 
+    // --- DistMazeClient tests ---
+
+    // One-shot mock server: accepts one connection, discards the op byte, writes `response`, closes.
+    fn mock_server(response: &'static [u8]) -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1];
+            stream.read_exact(&mut buf).ok(); // consume the single op byte
+            stream.write_all(response).ok();
+        });
+        addr
+    }
+
+    #[rstest]
+    #[case(b"\x00", Cell::Finish)]
+    #[case(b"\x01", Cell::Occupied)]
+    #[case(b"\x02", Cell::Open)]
+    #[case(b"\x03", Cell::Wall)]
+    fn look_dir_decodes_cell_response(#[case] response: &'static [u8], #[case] expected: Cell) {
+        // server returns a cell byte; client must decode it to the matching Cell variant
+        let addr = mock_server(response);
+        let client = DistMazeClient::try_from(addr).unwrap();
+        assert_eq!(client.look_dir(Direction::North).unwrap(), expected);
+    }
+
+    #[test]
+    fn look_dir_returns_err_on_unknown_response_byte() {
+        // 0xFF is the move-success sentinel, not a valid cell byte; client must return Err
+        let addr = mock_server(b"\xff");
+        let client = DistMazeClient::try_from(addr).unwrap();
+        assert!(client.look_dir(Direction::North).is_err());
+    }
+
+    #[test]
+    fn move_dir_returns_ok_on_success_byte() {
+        // 0xFF is the server's success sentinel for move_dir
+        let addr = mock_server(b"\xff");
+        let mut client = DistMazeClient::try_from(addr).unwrap();
+        assert!(client.move_dir(Direction::North).is_ok());
+    }
+
+    #[test]
+    fn move_dir_returns_err_on_error_response() {
+        // any byte other than 0xFF signals failure; 'E' (0x45) is the first byte of "Error"
+        let addr = mock_server(b"E");
+        let mut client = DistMazeClient::try_from(addr).unwrap();
+        assert!(client.move_dir(Direction::North).is_err());
+    }
+
+    #[test]
+    fn display_includes_server_addr() {
+        // Display should show the server address so the client can be identified in logs
+        let addr = mock_server(b"");
+        let client = DistMazeClient::try_from(addr).unwrap();
+        assert!(format!("{client}").contains(&addr.to_string()));
+    }
+
     // --- DistMazeServer::start tests ---
 
     #[rstest]
@@ -323,7 +430,11 @@ mod tests {
     #[case(Cell::Wall, &[0x03u8])]
     fn start_look_encodes_cell_variant(#[case] cell: Cell, #[case] expected: &[u8]) {
         // maze always returns `cell` regardless of direction; move_ok is irrelevant here
-        let maze = MockMaze { look_cell: cell, look_ok: true, move_ok: true };
+        let maze = MockMaze {
+            look_cell: cell,
+            look_ok: true,
+            move_ok: true,
+        };
         let (mut server, server_addr) = make_server(maze);
         // bind before start so the local address is known and can be pre-registered
         let (client, _) = bind_client(&mut server, 0);
@@ -353,7 +464,11 @@ mod tests {
     #[test]
     fn start_maze_error_returns_error() {
         // move_ok: false makes the maze reject every move, exercising the maze-error path
-        let maze = MockMaze { look_cell: Cell::Open, look_ok: true, move_ok: false };
+        let maze = MockMaze {
+            look_cell: Cell::Open,
+            look_ok: true,
+            move_ok: false,
+        };
         let (mut server, server_addr) = make_server(maze);
         let (client, _) = bind_client(&mut server, 0);
         thread::spawn(move || server.start().ok());

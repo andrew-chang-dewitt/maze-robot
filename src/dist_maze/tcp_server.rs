@@ -24,23 +24,30 @@ impl TcpServer {
     {
         for stream in self.listener.incoming() {
             let mut stream_ok = stream?;
-
             let from = stream_ok.peer_addr()?;
 
-            let mut message = [0u8; N];
-            stream_ok.read_exact(&mut message)?;
-            let body: T = match message.try_into() {
-                Ok(b) => b,
-                Err(e) => {
-                    let _ = stream_ok.write(e.to_string().as_bytes());
-                    continue;
+            loop {
+                let mut message = [0u8; N];
+                if let Err(e) = stream_ok.read_exact(&mut message) {
+                    if e.kind() != io::ErrorKind::UnexpectedEof {
+                        let _ = stream_ok.write(e.to_string().as_bytes());
+                    }
+                    break;
                 }
-            };
 
-            match handler(from, body) {
-                Ok(res) => stream_ok.write(res.into())?,
-                Err(_) => stream_ok.write("Error".as_bytes())?,
-            };
+                let body: T = match message.try_into() {
+                    Ok(b) => b,
+                    Err(e) => {
+                        let _ = stream_ok.write(e.to_string().as_bytes());
+                        break;
+                    }
+                };
+
+                match handler(from, body) {
+                    Ok(res) => stream_ok.write(res.into())?,
+                    Err(_) => stream_ok.write("Error".as_bytes())?,
+                };
+            }
         }
 
         Ok(())
