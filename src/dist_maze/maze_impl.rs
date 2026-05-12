@@ -3,6 +3,7 @@ use std::{
     fmt::Display,
     io::{self, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
+    sync::{Arc, RwLock},
     thread,
 };
 
@@ -114,6 +115,14 @@ impl Into<[u8; 1]> for ServerOpMsg {
     }
 }
 
+/// Mutable server state shared across pool worker threads. Wrapped in a single `RwLock` so the
+/// `bots` map and the maze stay in lock-step: a handler can atomically check-and-register a new
+/// peer plus dispatch its first op without an intervening lock release.
+struct ServerState<M: MultiMaze> {
+    maze: M,
+    bots: HashMap<SocketAddr, usize>,
+}
+
 impl<M: MultiMaze> DistMazeServer<M> {
     /// Returns the local address this server is bound to.
     ///
@@ -121,34 +130,42 @@ impl<M: MultiMaze> DistMazeServer<M> {
     pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
         self.server.local_addr()
     }
+}
 
+impl<M: MultiMaze + Send + Sync + 'static> DistMazeServer<M> {
     /// Runs the server's accept/dispatch loop on the current thread. Consumes `self`.
     ///
     /// Used internally by [`Self::start`] inside the spawned thread; not part of the public API.
     fn run(self) -> Result<(), MazeError> {
-        let DistMazeServer {
-            mut maze,
-            mut bots,
-            server,
-        } = self;
+        let DistMazeServer { maze, bots, server } = self;
+        // One RwLock guards both maze and bots. Handlers always take the write lock — registration
+        // (which mutates `bots`) and the first op need to be atomic, so the read/write split
+        // wouldn't buy parallelism on first contact anyway. Subsequent look_dirs across distinct
+        // bots could in principle share a read lock, but that's a future refinement; correctness
+        // first.
+        let state = Arc::new(RwLock::new(ServerState { maze, bots }));
 
         server
             .start(
                 move |addr: SocketAddr, msg: ServerOpMsg| -> Result<&'static [u8], io::Error> {
-                    let bot_id = match bots.get(&addr).copied() {
+                    let mut s = state.write().expect("state lock poisoned");
+
+                    let bot_id = match s.bots.get(&addr).copied() {
                         Some(id) => id,
                         None => {
-                            let id = maze.add_bot().map_err(|e| {
-                                io::Error::new(io::ErrorKind::Other, e.to_string())
-                            })?;
-                            bots.insert(addr, id);
+                            let id = s
+                                .maze
+                                .add_bot()
+                                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                            s.bots.insert(addr, id);
                             id
                         }
                     };
 
                     match msg.0 {
                         ServerOp::Look(dir) => {
-                            let cell = maze
+                            let cell = s
+                                .maze
                                 .look_dir(bot_id, dir)
                                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
                             Ok(match cell {
@@ -159,7 +176,8 @@ impl<M: MultiMaze> DistMazeServer<M> {
                             })
                         }
                         ServerOp::Move(dir) => {
-                            maze.move_dir(bot_id, dir)
+                            s.maze
+                                .move_dir(bot_id, dir)
                                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
                             Ok(b"\xff")
                         }
@@ -171,9 +189,7 @@ impl<M: MultiMaze> DistMazeServer<M> {
                 MazeError::new(MazeErrorType::CreationError(msg)).caused_by(e)
             })
     }
-}
 
-impl<M: MultiMaze + Send + 'static> DistMazeServer<M> {
     /// Spawns the server's accept/dispatch loop in a new thread and returns a one-shot shutdown
     /// closure. Consumes `self` — the server can only be started once.
     ///

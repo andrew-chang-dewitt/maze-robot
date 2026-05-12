@@ -2,6 +2,7 @@ mod maze_impl;
 mod robot_impl;
 mod swarm;
 mod tcp_server;
+mod thread_pool;
 
 pub use maze_impl::{DistMazeClient, DistMazeServer};
 pub use robot_impl::DistRobot;
@@ -10,9 +11,9 @@ pub use tcp_server::TcpServer;
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use crate::{Cell, Direction};
     use crate::text_maze::MultiTextMaze;
     use crate::traits::Robot;
+    use crate::{Cell, Direction};
     use std::net::SocketAddr;
 
     //  +++++
@@ -27,11 +28,8 @@ mod integration_tests {
     // Server is spawned first so it can accept; bot auto-registers on first connect.
     fn setup() -> DistRobot {
         let maze = MultiTextMaze::try_from(MAZE).expect("maze created");
-        let server = DistMazeServer::try_from((
-            maze,
-            "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
-        ))
-        .expect("server created");
+        let server = DistMazeServer::try_from((maze, "127.0.0.1:0".parse::<SocketAddr>().unwrap()))
+            .expect("server created");
         let server_addr = server.local_addr().unwrap();
         // start() spawns its own thread and returns a shutdown closure; dropping the closure
         // detaches the worker thread, which is fine here — the test process exit reaps it.

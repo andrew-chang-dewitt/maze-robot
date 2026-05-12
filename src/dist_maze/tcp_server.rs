@@ -1,12 +1,97 @@
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+use super::thread_pool::ThreadPool;
 
 #[derive(Debug)]
 pub struct TcpServer {
     listener: TcpListener,
     running: Arc<AtomicBool>,
+    pool: ThreadPool,
+}
+
+impl TcpServer {
+    pub fn new(listener: TcpListener) -> Self {
+        Self {
+            listener,
+            running: Arc::new(AtomicBool::new(false)),
+            pool: ThreadPool::new(
+                thread::available_parallelism()
+                    .map(|i| i.into())
+                    .unwrap_or(2),
+            ),
+        }
+    }
+
+    pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
+        self.listener.local_addr()
+    }
+
+    /// Returns a [`StopSignal`] that can be used to shut down the server from another thread.
+    ///
+    /// Must be called before [`Self::start`] (since the server is typically moved into the thread
+    /// that runs `start`, callers lose access after that point).
+    pub fn stop_signal(&self) -> Result<StopSignal, io::Error> {
+        Ok(StopSignal {
+            running: Arc::clone(&self.running),
+            addr: self.listener.local_addr()?,
+        })
+    }
+
+    /// Start listener loop; passing each accepted connection to a worker in the ThreadPool.
+    pub fn start<'a, T, R, E, F, const N: usize>(&self, handler: F) -> Result<(), io::Error>
+    where
+        E: Into<io::Error>,
+        R: Into<&'a [u8]>,
+        F: FnMut(SocketAddr, T) -> Result<R, E> + Send + Sync + 'static,
+        T: TryFrom<[u8; N], Error = io::Error> + Into<[u8; N]>,
+    {
+        let handler_arc = Arc::new(Mutex::new(handler));
+        self.running.store(true, Ordering::SeqCst);
+
+        for stream in self.listener.incoming() {
+            // Check flag before doing anything with the new stream so a wake-up self-connect
+            // (sent by StopSignal::stop) exits cleanly without entering the read loop.
+            if !self.running.load(Ordering::SeqCst) {
+                break;
+            }
+
+            let mut stream_ok = stream?;
+            let from = stream_ok.peer_addr()?;
+
+            let handler_clone = Arc::clone(&handler_arc);
+
+            self.pool.execute(move || {
+                loop {
+                    let mut message = [0u8; N];
+                    if let Err(e) = stream_ok.read_exact(&mut message) {
+                        if e.kind() != io::ErrorKind::UnexpectedEof {
+                            let _ = stream_ok.write(e.to_string().as_bytes());
+                        }
+                        break;
+                    }
+
+                    let body: T = match message.try_into() {
+                        Ok(b) => b,
+                        Err(e) => {
+                            let _ = stream_ok.write(e.to_string().as_bytes());
+                            break;
+                        }
+                    };
+
+                    match handler_clone.lock().expect("handler to be available")(from, body) {
+                        Ok(res) => stream_ok.write(res.into()).expect("response to write"),
+                        Err(_) => stream_ok.write("Error".as_bytes()).expect("error to write"),
+                    };
+                }
+            })
+        }
+
+        Ok(())
+    }
 }
 
 /// External handle that signals a running [`TcpServer`] to stop accepting new connections.
@@ -33,80 +118,6 @@ impl StopSignal {
         self.running.store(false, Ordering::SeqCst);
         // Wake up a blocked accept() so the loop body runs once more and sees the flag.
         let _ = TcpStream::connect(self.addr);
-    }
-}
-
-impl TcpServer {
-    pub fn new(listener: TcpListener) -> Self {
-        Self {
-            listener,
-            running: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
-        self.listener.local_addr()
-    }
-
-    /// Returns a [`StopSignal`] that can be used to shut down the server from another thread.
-    ///
-    /// Must be called before [`Self::start`] (since the server is typically moved into the thread
-    /// that runs `start`, callers lose access after that point).
-    pub fn stop_signal(&self) -> Result<StopSignal, io::Error> {
-        Ok(StopSignal {
-            running: Arc::clone(&self.running),
-            addr: self.listener.local_addr()?,
-        })
-    }
-
-    // FIXME: serial connection handling — the outer `for stream in incoming()` plus the inner
-    // per-stream `loop` means only one client is serviced at a time; subsequent accept()s block
-    // until the active stream EOFs. Acceptable for single-bot dev, not for a swarm. Revisit with
-    // per-connection threads (Arc<Mutex<...>> on shared state) or async I/O.
-    pub fn start<'a, T, R, E, F, const N: usize>(&self, mut handler: F) -> Result<(), io::Error>
-    where
-        E: Into<io::Error>,
-        R: Into<&'a [u8]>,
-        F: FnMut(SocketAddr, T) -> Result<R, E>,
-        T: TryFrom<[u8; N], Error = io::Error> + Into<[u8; N]>,
-    {
-        self.running.store(true, Ordering::SeqCst);
-
-        for stream in self.listener.incoming() {
-            // Check flag before doing anything with the new stream so a wake-up self-connect
-            // (sent by StopSignal::stop) exits cleanly without entering the read loop.
-            if !self.running.load(Ordering::SeqCst) {
-                break;
-            }
-
-            let mut stream_ok = stream?;
-            let from = stream_ok.peer_addr()?;
-
-            loop {
-                let mut message = [0u8; N];
-                if let Err(e) = stream_ok.read_exact(&mut message) {
-                    if e.kind() != io::ErrorKind::UnexpectedEof {
-                        let _ = stream_ok.write(e.to_string().as_bytes());
-                    }
-                    break;
-                }
-
-                let body: T = match message.try_into() {
-                    Ok(b) => b,
-                    Err(e) => {
-                        let _ = stream_ok.write(e.to_string().as_bytes());
-                        break;
-                    }
-                };
-
-                match handler(from, body) {
-                    Ok(res) => stream_ok.write(res.into())?,
-                    Err(_) => stream_ok.write("Error".as_bytes())?,
-                };
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -163,7 +174,8 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let server = TcpServer::new(listener);
-        let result = server.start(|_addr: SocketAddr, _msg: Msg| Ok::<&'static [u8], io::Error>(b""));
+        let result =
+            server.start(|_addr: SocketAddr, _msg: Msg| Ok::<&'static [u8], io::Error>(b""));
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::WouldBlock);
     }
@@ -185,7 +197,8 @@ mod tests {
         });
 
         send_recv(addr, &[42u8], 1);
-        let received = rx.recv_timeout(Duration::from_secs(1))
+        let received = rx
+            .recv_timeout(Duration::from_secs(1))
             .expect("handler not called within 1 second");
         assert_eq!(received, Msg(42));
     }
@@ -300,7 +313,8 @@ mod tests {
 
         for i in 0u8..3 {
             send_recv(addr, &[i], 1);
-            let received = rx.recv_timeout(Duration::from_secs(1))
+            let received = rx
+                .recv_timeout(Duration::from_secs(1))
                 .expect("handler not called within 1 second");
             assert_eq!(received, Msg(i));
         }
@@ -328,7 +342,8 @@ mod tests {
         client.write_all(&[1u8]).unwrap();
         client.shutdown(std::net::Shutdown::Write).unwrap();
 
-        let received_peer = rx.recv_timeout(Duration::from_secs(1))
+        let received_peer = rx
+            .recv_timeout(Duration::from_secs(1))
             .expect("handler not called within 1 second");
         assert_eq!(received_peer, client_addr);
     }
