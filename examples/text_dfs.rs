@@ -48,7 +48,7 @@ fn dfs_path(robot: TextRobot) -> anyhow::Result<Solution> {
 }
 
 #[derive(Eq, Debug, PartialEq)]
-pub struct Solution {
+struct Solution {
     winner: Vec<Key>,
     seen: Seen,
 }
@@ -91,8 +91,8 @@ impl Seen {
 
         // #[cfg(feature = "verbose")]
         // {
-        //     println!("[Seen::push] added {key}:{cell:?}");
-        //     println!("{self}")
+        //     eprintln!("[Seen::push] added {key}:{cell:?}");
+        //     eprintln!("{self}")
         // }
     }
 
@@ -139,7 +139,7 @@ fn dfs_helper(
 ) -> Result<(), MaybePath> {
     // #[cfg(any(test, feature = "verbose"))]
     // {
-    //     println!("[dfs_helper] BEGIN w/\n{robot},\n{node:?}, & {visited:?}\n")
+    //     eprintln!("[dfs_helper] BEGIN w/\n{robot},\n{node:?}, & {visited:?}\n")
     // }
     let Node {
         key,
@@ -166,7 +166,7 @@ fn dfs_helper(
         .map(|&dir| {
             // #[cfg(feature = "verbose")]
             // {
-            //     println!("looking to the {dir}");
+            //     eprintln!("looking to the {dir}");
             // }
             (
                 dir,
@@ -195,13 +195,13 @@ fn dfs_helper(
             let node_direction = node.direction;
             // #[cfg(test)]
             // {
-            //     println!("[dfs_helper] handling neighbor {node:?}\n")
+            //     eprintln!("[dfs_helper] handling neighbor {node:?}\n")
             // }
             // if in visited, skip node
             if visited.contains(&node_key) {
                 // #[cfg(test)]
                 // {
-                //     println!("[dfs_helper] skipping neighbor in visited")
+                //     eprintln!("[dfs_helper] skipping neighbor in visited")
                 // }
                 return Ok(());
             }
@@ -214,7 +214,7 @@ fn dfs_helper(
                     path.push(key);
                     // #[cfg(test)]
                     // {
-                    //     println!("[dfs_helper] Finish found! building solution path: {path:?}")
+                    //     eprintln!("[dfs_helper] Finish found! building solution path: {path:?}")
                     // }
                     // end iteration early & propagate solution upward
                     // by returning solution as Err
@@ -226,7 +226,7 @@ fn dfs_helper(
                 Ok(()) => {
                     // #[cfg(test)]
                     // {
-                    //     println!("[dfs_helper] Solution not found through this node, moving back up one node.")
+                    //     eprintln!("[dfs_helper] Solution not found through this node, moving back up one node.")
                     // }
                     if let Some(dir) = node_direction {
                         let new_dir = dir.reverse();
@@ -239,7 +239,7 @@ fn dfs_helper(
                 _ => {
                     #[cfg(test)]
                     {
-                        println!("[dfs_helper] Error encountered! propagating upward...")
+                        eprintln!("[dfs_helper] Error encountered! propagating upward...")
                     }
                     recur_res
                 }
@@ -270,7 +270,7 @@ impl Default for Node {
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
-pub struct Key(isize, isize);
+struct Key(isize, isize);
 
 impl Key {
     pub fn compute_in_dir(&self, direction: &Direction) -> Self {

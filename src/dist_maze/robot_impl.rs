@@ -87,19 +87,19 @@ impl DistRobot {
 
     /// Send a message to all peer robots via the swarm broadcast.
     ///
-    /// The message is encoded into bytes via the user-provided `TryInto<Vec<u8>>` impl, then
+    /// The message is encoded into bytes via the user-provided `TryInto<[u8; 32]>` impl, then
     /// broadcast to `255.255.255.255:port`. Returns `RobotError::NotJoined` if `join_swarm`
     /// has not been called.
-    pub fn send<T>(&self, msg: T) -> Result<(), RobotError>
+    pub fn try_send<T, const N: usize>(&self, msg: T) -> Result<(), RobotError>
     where
-        T: TryInto<Vec<u8>>,
+        T: TryInto<[u8; N]>,
         T::Error: std::error::Error + Send + Sync + 'static,
     {
         let swarm = self
             .swarm
             .as_ref()
             .ok_or_else(|| RobotError::new(RobotErrorType::NotJoined))?;
-        let payload: Vec<u8> = msg.try_into().map_err(|e| {
+        let payload: [u8; N] = msg.try_into().map_err(|e| {
             RobotError::new(RobotErrorType::EncodeError(e.to_string())).caused_by(e)
         })?;
         swarm
@@ -109,10 +109,10 @@ impl DistRobot {
 
     /// Fetch the next unprocessed message from the swarm. Non-blocking: returns `Ok(None)` when
     /// no message is currently waiting. The payload is decoded into `T` via the user-provided
-    /// `TryFrom<Vec<u8>>` impl. Messages this robot sent are dropped (the user never sees them).
-    pub fn try_recv<T>(&self) -> Result<Option<T>, RobotError>
+    /// `TryFrom<[u8; 32]>` impl. Messages this robot sent are dropped (the user never sees them).
+    pub fn try_recv<T, const N: usize>(&self) -> Result<Option<T>, RobotError>
     where
-        T: TryFrom<Vec<u8>>,
+        T: TryFrom<[u8; N]>,
         T::Error: std::error::Error + Send + Sync + 'static,
     {
         let swarm = self
@@ -183,7 +183,7 @@ mod tests {
         direction: Direction,
     ) {
         // each direction gets its own fresh mock and robot connection; server always returns Wall
-        let robot = make_robot(one_shot_mock(b"\x03"));
+        let robot = make_robot(one_shot_mock(b"\x03\x00\x00\x00\x00"));
         assert_eq!(robot.peek(direction).unwrap(), Cell::Wall);
     }
 
@@ -192,27 +192,27 @@ mod tests {
         #[values(Direction::North, Direction::East, Direction::South, Direction::West)]
         direction: Direction,
     ) {
-        let robot = make_robot(one_shot_mock(b"\x02"));
+        let robot = make_robot(one_shot_mock(b"\x02\x00\x00\x00\x00"));
         assert_eq!(robot.peek(direction).unwrap(), Cell::Open);
     }
 
     #[test]
     fn test_peek_finish() {
-        let robot = make_robot(one_shot_mock(b"\x00"));
+        let robot = make_robot(one_shot_mock(b"\x00\x00\x00\x00\x00"));
         assert_eq!(robot.peek(Direction::East).unwrap(), Cell::Finish);
     }
 
     #[test]
     fn test_peek_occupied() {
         // Cell::Occupied has no TextMaze analogue — unique to multi-robot distributed mazes
-        let robot = make_robot(one_shot_mock(b"\x01"));
-        assert_eq!(robot.peek(Direction::East).unwrap(), Cell::Occupied);
+        let robot = make_robot(one_shot_mock(b"\x01\x01\x00\x00\x00"));
+        assert_eq!(robot.peek(Direction::East).unwrap(), Cell::Occupied(1));
     }
 
     #[test]
     fn test_peek_returns_err_on_server_error() {
         // 0xFF is the move-success sentinel, not a valid cell byte; must propagate as Err
-        let robot = make_robot(one_shot_mock(b"\xff"));
+        let robot = make_robot(one_shot_mock(b"\xff\x00\x00\x00\x00"));
         assert!(robot.peek(Direction::North).is_err());
     }
 
@@ -224,21 +224,22 @@ mod tests {
         direction: Direction,
     ) -> Result<(), MazeError> {
         // server returns the move-success sentinel 0xFF; go must return Ok for every direction
-        let robot = make_robot(one_shot_mock(b"\xff"));
+        let robot = make_robot(one_shot_mock(b"\xff\x00\x00\x00\x00"));
         robot.go(direction)
     }
 
     #[test]
     fn test_go_returns_err_on_move_failure() {
         // 'E' (0x45, first byte of "Error") is not 0xFF; client returns Err, robot propagates it
-        let robot = make_robot(one_shot_mock(b"E"));
+        let robot = make_robot(one_shot_mock(b"E\x00\x00\x00\x00"));
         assert!(robot.go(Direction::North).is_err());
     }
 
     // --- swarm tests ---
     mod swarm {
         use super::*;
-        use std::convert::Infallible;
+        use std::error::Error;
+        use std::fmt::Display;
         use std::sync::atomic::{AtomicU16, Ordering};
         use std::time::{Duration, Instant};
 
@@ -258,35 +259,64 @@ mod tests {
                 .expect("robot joins swarm")
         }
 
-        // Simple String<->Vec<u8> codec via TryFrom/TryInto, used by every test.
+        // Simple String<->[u8; 32] codec via TryFrom/TryInto, used by every test.
         #[derive(Debug, Clone, PartialEq)]
         struct Msg(String);
 
-        impl TryFrom<Vec<u8>> for Msg {
-            type Error = std::string::FromUtf8Error;
-            fn try_from(v: Vec<u8>) -> Result<Self, Self::Error> {
-                String::from_utf8(v).map(Msg)
+        #[derive(Debug)]
+        struct MsgError(String);
+
+        impl Display for MsgError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.0)
             }
         }
 
-        impl TryFrom<Msg> for Vec<u8> {
-            type Error = Infallible;
-            fn try_from(m: Msg) -> Result<Self, Self::Error> {
-                Ok(m.0.into_bytes())
+        impl Error for MsgError {}
+
+        impl TryFrom<[u8; 32]> for Msg {
+            type Error = MsgError;
+
+            fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+                let trimmed: Vec<u8> = bytes.iter().copied().take_while(|&b| b != 0).collect();
+                String::from_utf8(trimmed)
+                    .map(Msg)
+                    .map_err(|e| MsgError(format!("Error parsing bytes {bytes:?}:\n{e}")))
+            }
+        }
+
+        impl TryFrom<Msg> for [u8; 32] {
+            type Error = MsgError;
+
+            fn try_from(msg: Msg) -> Result<Self, Self::Error> {
+                let mut as_vec = Vec::from(msg.0.as_bytes());
+
+                // pad vec w/ null bytes to get length to 32
+                while as_vec.len() < 32 {
+                    as_vec.push(b"\0"[0]);
+                }
+
+                as_vec.try_into().map_err(|e| {
+                    MsgError(format!(
+                        "Failed to encode {msg:?} to [u8; 32]; vec {e:?} too long"
+                    ))
+                })
             }
         }
 
         // Pull every available Msg off `r` for at most `total`, returning the strings received.
-        fn drain(r: &DistRobot, total: Duration) -> Vec<String> {
+        fn drain(robot: &DistRobot, total: Duration) -> Vec<String> {
             let deadline = Instant::now() + total;
             let mut out = Vec::new();
+
             while Instant::now() < deadline {
-                match r.try_recv::<Msg>() {
+                match robot.try_recv::<Msg, 32>() {
                     Ok(Some(m)) => out.push(m.0),
                     Ok(None) => thread::sleep(Duration::from_millis(5)),
                     Err(e) => panic!("try_recv failed: {e}"),
                 }
             }
+
             out
         }
 
@@ -298,8 +328,8 @@ mod tests {
             let a = make_swarm_robot(port);
             let b = make_swarm_robot(port);
 
-            a.send(Msg("from-a".into())).expect("a sends");
-            b.send(Msg("from-b".into())).expect("b sends");
+            a.try_send(Msg("from-a".into())).expect("a sends");
+            b.try_send(Msg("from-b".into())).expect("b sends");
 
             let ra = drain(&a, Duration::from_millis(200));
             let rb = drain(&b, Duration::from_millis(200));
@@ -325,9 +355,9 @@ mod tests {
             let b = make_swarm_robot(port);
             let c = make_swarm_robot(port);
 
-            a.send(Msg("from-a".into())).unwrap();
-            b.send(Msg("from-b".into())).unwrap();
-            c.send(Msg("from-c".into())).unwrap();
+            a.try_send(Msg("from-a".into())).unwrap();
+            b.try_send(Msg("from-b".into())).unwrap();
+            c.try_send(Msg("from-c".into())).unwrap();
 
             let ra = drain(&a, Duration::from_millis(200));
             let rb = drain(&b, Duration::from_millis(200));
@@ -356,14 +386,14 @@ mod tests {
             // Fresh robot with no senders: try_recv must yield Ok(None), not block or error.
             let port = next_port();
             let a = make_swarm_robot(port);
-            assert!(matches!(a.try_recv::<Msg>(), Ok(None)));
+            assert!(matches!(a.try_recv::<Msg, 32>(), Ok(None)));
         }
 
         #[test]
         fn send_without_join_swarm_returns_not_joined() {
             // join_swarm was never called; send must surface NotJoined.
             let r = make_robot(one_shot_mock(b"\x02"));
-            let err = r.send(Msg("x".into())).expect_err("send must fail");
+            let err = r.try_send(Msg("x".into())).expect_err("send must fail");
             assert!(matches!(err.get_type(), RobotErrorType::NotJoined));
         }
 
@@ -371,7 +401,7 @@ mod tests {
         fn try_recv_without_join_swarm_returns_not_joined() {
             // join_swarm was never called; try_recv must surface NotJoined.
             let r = make_robot(one_shot_mock(b"\x02"));
-            let err = r.try_recv::<Msg>().expect_err("try_recv must fail");
+            let err = r.try_recv::<Msg, 32>().expect_err("try_recv must fail");
             assert!(matches!(err.get_type(), RobotErrorType::NotJoined));
         }
     }

@@ -29,7 +29,7 @@ use std::{
 use anyhow::{Context, anyhow};
 use clap::Parser;
 
-use maze_robot::{Cell, DIR_ARR, Direction, dist_maze::DistRobot, traits::Robot};
+use maze_robot::{Cell, CellDecodeError, DIR_ARR, Direction, dist_maze::DistRobot, traits::Robot};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -60,14 +60,17 @@ fn main() -> anyhow::Result<()> {
     let halt = Arc::new(AtomicBool::new(false));
     let state = SwarmState::new(bot_id, halt.clone());
 
-    eprintln!("[bot {bot_id:#x}] connected to maze {}; swarm port {}", app.maze, app.port);
+    eprintln!(
+        "[bot {bot_id:#x}] connected to maze {}; swarm port {}",
+        app.maze, app.port
+    );
 
     let result = dfs_path(&robot, &state);
 
     // If we found the finish, tell everyone else so they can halt too.
     if let Ok(sol) = &result {
         if let Some(finish_key) = sol.winner.first() {
-            let _ = robot.send(SwarmMsg::FinishFound {
+            let _ = robot.try_send(SwarmMsg::FinishFound {
                 bot_id,
                 key: *finish_key,
             });
@@ -96,10 +99,10 @@ fn main() -> anyhow::Result<()> {
 /// these from inside it; the DFS is single-threaded so this is safe. `halt` is the cross-task
 /// flag (Arc<AtomicBool>) so it can also be observed from places like signal handlers later.
 struct SwarmState {
-    bot_id: u64,
+    bot_id: u32,
     halt: Arc<AtomicBool>,
     halted_by_peer: RefCell<bool>,
-    peers: RefCell<HashMap<u64, PeerRecord>>,
+    peers: RefCell<HashMap<u32, PeerRecord>>,
 }
 
 #[derive(Default)]
@@ -109,7 +112,7 @@ struct PeerRecord {
 }
 
 impl SwarmState {
-    fn new(bot_id: u64, halt: Arc<AtomicBool>) -> Self {
+    fn new(bot_id: u32, halt: Arc<AtomicBool>) -> Self {
         Self {
             bot_id,
             halt,
@@ -133,7 +136,7 @@ impl SwarmState {
     /// Pull every pending swarm message off the socket and fold it into peer state. Non-blocking.
     fn drain_incoming(&self, robot: &DistRobot) {
         loop {
-            match robot.try_recv::<SwarmMsg>() {
+            match robot.try_recv::<SwarmMsg, 32>() {
                 Ok(Some(msg)) => self.apply(msg),
                 Ok(None) => return,
                 Err(e) => {
@@ -188,50 +191,29 @@ impl SwarmState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SwarmMsg {
-    Seen { bot_id: u64, key: Key, cell: Cell },
-    Visited { bot_id: u64, key: Key },
-    FinishFound { bot_id: u64, key: Key },
+    Seen { bot_id: u32, key: Key, cell: Cell },
+    Visited { bot_id: u32, key: Key },
+    FinishFound { bot_id: u32, key: Key },
 }
 
 const TAG_SEEN: u8 = 0;
 const TAG_VISITED: u8 = 1;
 const TAG_FINISH: u8 = 2;
 
-const CELL_FINISH: u8 = 0;
-const CELL_OCCUPIED: u8 = 1;
-const CELL_OPEN: u8 = 2;
-const CELL_WALL: u8 = 3;
+impl TryFrom<SwarmMsg> for [u8; 32] {
+    type Error = MsgError;
 
-fn encode_cell(c: Cell) -> u8 {
-    match c {
-        Cell::Finish => CELL_FINISH,
-        Cell::Occupied => CELL_OCCUPIED,
-        Cell::Open => CELL_OPEN,
-        Cell::Wall => CELL_WALL,
-    }
-}
-
-fn decode_cell(b: u8) -> Result<Cell, MsgError> {
-    match b {
-        CELL_FINISH => Ok(Cell::Finish),
-        CELL_OCCUPIED => Ok(Cell::Occupied),
-        CELL_OPEN => Ok(Cell::Open),
-        CELL_WALL => Ok(Cell::Wall),
-        b => Err(MsgError(format!("unknown cell byte {b:#x}"))),
-    }
-}
-
-impl TryFrom<SwarmMsg> for Vec<u8> {
-    type Error = std::convert::Infallible;
-    fn try_from(m: SwarmMsg) -> Result<Self, Self::Error> {
+    fn try_from(msg: SwarmMsg) -> Result<Self, Self::Error> {
         let mut buf = Vec::with_capacity(32);
-        match m {
+
+        match msg {
             SwarmMsg::Seen { bot_id, key, cell } => {
                 buf.push(TAG_SEEN);
                 buf.extend_from_slice(&bot_id.to_le_bytes());
                 buf.extend_from_slice(&(key.0 as i64).to_le_bytes());
                 buf.extend_from_slice(&(key.1 as i64).to_le_bytes());
-                buf.push(encode_cell(cell));
+                let cell_b: [u8; 5] = cell.into();
+                buf.extend_from_slice(&cell_b);
             }
             SwarmMsg::Visited { bot_id, key } => {
                 buf.push(TAG_VISITED);
@@ -245,37 +227,33 @@ impl TryFrom<SwarmMsg> for Vec<u8> {
                 buf.extend_from_slice(&(key.0 as i64).to_le_bytes());
                 buf.extend_from_slice(&(key.1 as i64).to_le_bytes());
             }
+        };
+
+        // pad vec w/ null bytes to get length to 32
+        while buf.len() < 32 {
+            buf.push(b"\0"[0]);
         }
-        Ok(buf)
+
+        buf.try_into().map_err(|e| {
+            MsgError(format!(
+                "Failed to encode {msg:?} to [u8; 32]; vec {e:?} too long"
+            ))
+        })
     }
 }
 
-#[derive(Debug)]
-struct MsgError(String);
-impl Display for MsgError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MsgError: {}", self.0)
-    }
-}
-impl std::error::Error for MsgError {}
-
-impl TryFrom<Vec<u8>> for SwarmMsg {
+impl TryFrom<[u8; 32]> for SwarmMsg {
     type Error = MsgError;
-    fn try_from(v: Vec<u8>) -> Result<Self, Self::Error> {
-        let tag = *v.first().ok_or_else(|| MsgError("empty msg".into()))?;
-        if v.len() < 25 {
-            return Err(MsgError(format!("msg too short ({} bytes)", v.len())));
-        }
-        let bot_id = u64::from_le_bytes(v[1..9].try_into().unwrap());
-        let x = i64::from_le_bytes(v[9..17].try_into().unwrap()) as isize;
-        let y = i64::from_le_bytes(v[17..25].try_into().unwrap()) as isize;
+
+    fn try_from(buf: [u8; 32]) -> Result<Self, Self::Error> {
+        let tag = *buf.first().ok_or_else(|| MsgError("empty msg".into()))?;
+        let bot_id = u32::from_le_bytes(buf[1..5].try_into().unwrap());
+        let x = i64::from_le_bytes(buf[5..13].try_into().unwrap()) as isize;
+        let y = i64::from_le_bytes(buf[13..21].try_into().unwrap()) as isize;
         let key = Key(x, y);
         match tag {
             TAG_SEEN => {
-                if v.len() < 26 {
-                    return Err(MsgError("Seen msg missing cell byte".into()));
-                }
-                let cell = decode_cell(v[25])?;
+                let cell: Cell = [buf[21], buf[22], buf[23], buf[24], buf[25]].try_into()?;
                 Ok(SwarmMsg::Seen { bot_id, key, cell })
             }
             TAG_VISITED => Ok(SwarmMsg::Visited { bot_id, key }),
@@ -285,12 +263,29 @@ impl TryFrom<Vec<u8>> for SwarmMsg {
     }
 }
 
-fn rand_bot_id() -> u64 {
+#[derive(Debug)]
+struct MsgError(String);
+
+impl Display for MsgError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MsgError: {}", self.0)
+    }
+}
+
+impl std::error::Error for MsgError {}
+
+impl From<CellDecodeError> for MsgError {
+    fn from(value: CellDecodeError) -> Self {
+        Self(format!("Error decoding Cell: {value}"))
+    }
+}
+
+fn rand_bot_id() -> u32 {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_nanos() as u64;
-    let stack = &nanos as *const _ as u64;
+        .as_nanos() as u32;
+    let stack = &nanos as *const _ as u32;
     nanos ^ stack
 }
 
@@ -348,7 +343,19 @@ impl Display for Seen {
                     Some(Cell::Open) => out.push('·'),
                     Some(Cell::Wall) => out.push('░'),
                     Some(Cell::Finish) => out.push('F'),
-                    Some(Cell::Occupied) => out.push('O'),
+                    Some(Cell::Occupied(id)) => {
+                        let character = match (*id).try_into() {
+                            Ok(i) => match i {
+                                0..=9 => (b'0' + i) as char,
+                                10..=35 => (b'A' + (i - 10)) as char,
+                                36..=61 => (b'a' + (i - 36)) as char,
+                                _ => '?',
+                            },
+                            _ => '?',
+                        };
+
+                        out.push(character)
+                    }
                     None => out.push(' '),
                 }
             }
@@ -409,7 +416,9 @@ fn dfs_path(robot: &DistRobot, state: &SwarmState) -> anyhow::Result<Solution> {
             if state.halted_by_peer() {
                 Err(anyhow!("halted: peer found the finish first"))
             } else {
-                Err(anyhow!("exhausted: no path to finish from this bot's start"))
+                Err(anyhow!(
+                    "exhausted: no path to finish from this bot's start"
+                ))
             }
         }
         Err(MaybePath::Error(e)) => Err(e.context("error encountered while searching for finish")),
@@ -453,7 +462,7 @@ fn dfs_helper(
             .go(dir)
             .map_err(|e| MaybePath::Error(anyhow::Error::new(e)))?;
         // Broadcast that we've entered this cell.
-        let _ = robot.send(SwarmMsg::Visited {
+        let _ = robot.try_send(SwarmMsg::Visited {
             bot_id: state.bot_id,
             key,
         });
@@ -478,7 +487,7 @@ fn dfs_helper(
             let neighbor_key = key.compute_in_dir(&dir);
             if let Ok(c) = cell_res {
                 seen.borrow_mut().push(neighbor_key, c);
-                let _ = robot.send(SwarmMsg::Seen {
+                let _ = robot.try_send(SwarmMsg::Seen {
                     bot_id: state.bot_id,
                     key: neighbor_key,
                     cell: c,
@@ -489,7 +498,7 @@ fn dfs_helper(
         // Walls and occupied cells aren't walkable — skip without recursing.
         .filter_map(|(dir, neighbor_key, cell_res)| match cell_res {
             Err(e) => Some(Err(e)),
-            Ok(Cell::Wall) | Ok(Cell::Occupied) => None,
+            Ok(Cell::Wall) | Ok(Cell::Occupied(_)) => None,
             Ok(c) => Some(Ok(Node {
                 key: neighbor_key,
                 cell: c,
@@ -545,11 +554,11 @@ mod tests {
     #[test]
     fn codec_round_trip_seen() {
         let msg = SwarmMsg::Seen {
-            bot_id: 0xDEAD_BEEF_CAFE_0001,
+            bot_id: 0xDEAD_BEEF,
             key: Key(-3, 7),
             cell: Cell::Open,
         };
-        let bytes: Vec<u8> = msg.try_into().unwrap();
+        let bytes: [u8; 32] = msg.try_into().unwrap();
         let back: SwarmMsg = bytes.try_into().unwrap();
         assert_eq!(back, msg);
     }
@@ -557,10 +566,10 @@ mod tests {
     #[test]
     fn codec_round_trip_visited() {
         let msg = SwarmMsg::Visited {
-            bot_id: 0xABCD_0123_4567_89EF,
+            bot_id: 0xABCD_0123,
             key: Key(42, -100),
         };
-        let bytes: Vec<u8> = msg.try_into().unwrap();
+        let bytes: [u8; 32] = msg.try_into().unwrap();
         let back: SwarmMsg = bytes.try_into().unwrap();
         assert_eq!(back, msg);
     }
@@ -571,20 +580,20 @@ mod tests {
             bot_id: 1,
             key: Key(0, 0),
         };
-        let bytes: Vec<u8> = msg.try_into().unwrap();
+        let bytes: [u8; 32] = msg.try_into().unwrap();
         let back: SwarmMsg = bytes.try_into().unwrap();
         assert_eq!(back, msg);
     }
 
     #[test]
     fn codec_round_trip_every_cell_variant() {
-        for cell in [Cell::Finish, Cell::Occupied, Cell::Open, Cell::Wall] {
+        for cell in [Cell::Finish, Cell::Occupied(1), Cell::Open, Cell::Wall] {
             let msg = SwarmMsg::Seen {
                 bot_id: 99,
                 key: Key(1, 2),
                 cell,
             };
-            let bytes: Vec<u8> = msg.try_into().unwrap();
+            let bytes: [u8; 32] = msg.try_into().unwrap();
             let back: SwarmMsg = bytes.try_into().unwrap();
             assert_eq!(back, msg);
         }
@@ -592,27 +601,9 @@ mod tests {
 
     #[test]
     fn decode_rejects_unknown_tag() {
-        let bytes = vec![0xFF; 26];
+        let bytes = [0xFF; 32];
         let err = SwarmMsg::try_from(bytes).unwrap_err();
         assert!(format!("{err}").contains("unknown tag"));
-    }
-
-    #[test]
-    fn decode_rejects_short_msg() {
-        let bytes = vec![TAG_SEEN, 1, 2, 3];
-        let err = SwarmMsg::try_from(bytes).unwrap_err();
-        assert!(format!("{err}").contains("too short"));
-    }
-
-    #[test]
-    fn decode_rejects_short_seen_missing_cell() {
-        // header (25 bytes) but no cell byte
-        let mut bytes = vec![TAG_SEEN];
-        bytes.extend_from_slice(&0u64.to_le_bytes());
-        bytes.extend_from_slice(&0i64.to_le_bytes());
-        bytes.extend_from_slice(&0i64.to_le_bytes());
-        let err = SwarmMsg::try_from(bytes).unwrap_err();
-        assert!(format!("{err}").contains("missing cell"));
     }
 
     #[test]

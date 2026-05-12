@@ -42,10 +42,13 @@ impl TcpServer {
     }
 
     /// Start listener loop; passing each accepted connection to a worker in the ThreadPool.
-    pub fn start<'a, T, R, E, F, const N: usize>(&self, handler: F) -> Result<(), io::Error>
+    pub fn start<'a, T, R, E, F, const M: usize, const N: usize>(
+        &self,
+        handler: F,
+    ) -> Result<(), io::Error>
     where
         E: Into<io::Error>,
-        R: Into<&'a [u8]>,
+        R: Into<[u8; M]>,
         F: FnMut(SocketAddr, T) -> Result<R, E> + Send + Sync + 'static,
         T: TryFrom<[u8; N], Error = io::Error> + Into<[u8; N]>,
     {
@@ -83,8 +86,8 @@ impl TcpServer {
                     };
 
                     match handler_clone.lock().expect("handler to be available")(from, body) {
-                        Ok(res) => stream_ok.write(res.into()).expect("response to write"),
-                        Err(_) => stream_ok.write("Error".as_bytes()).expect("error to write"),
+                        Ok(res) => stream_ok.write(&res.into()).expect("response to write"),
+                        Err(_) => stream_ok.write(b"ERR").expect("error to write"),
                     };
                 }
             })
@@ -128,6 +131,14 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
+
+    const DOT: [u8; 1] = ('.' as u8).to_le_bytes();
+    const OK: [u8; 2] = [('O' as u8).to_le_bytes()[0], ('K' as u8).to_le_bytes()[0]];
+    const ERR: [u8; 3] = [
+        ('E' as u8).to_le_bytes()[0],
+        ('R' as u8).to_le_bytes()[0],
+        ('R' as u8).to_le_bytes()[0],
+    ];
 
     // Minimal test message type: wraps a single byte.
     // TryFrom fails on 0xFF to exercise parse-error path.
@@ -174,8 +185,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let server = TcpServer::new(listener);
-        let result =
-            server.start(|_addr: SocketAddr, _msg: Msg| Ok::<&'static [u8], io::Error>(b""));
+        let result = server.start(|_addr: SocketAddr, _msg: Msg| Ok::<[u8; 0], io::Error>([]));
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::WouldBlock);
     }
@@ -191,7 +201,7 @@ mod tests {
             server
                 .start(move |_addr, msg: Msg| {
                     tx.send(msg).ok();
-                    Ok::<&'static [u8], io::Error>(b".")
+                    Ok::<[u8; 1], io::Error>(DOT)
                 })
                 .ok();
         });
@@ -211,12 +221,12 @@ mod tests {
 
         thread::spawn(move || {
             server
-                .start(|_addr, _msg: Msg| Ok::<&'static [u8], io::Error>(b"OK"))
+                .start(|_addr, _msg: Msg| Ok::<[u8; 2], io::Error>(OK))
                 .ok();
         });
 
         let response = send_recv(addr, &[1u8], 2);
-        assert_eq!(response, b"OK");
+        assert_eq!(response, OK);
     }
 
     #[test]
@@ -228,7 +238,7 @@ mod tests {
         thread::spawn(move || {
             server
                 .start(|_addr, _msg: Msg| {
-                    Err::<&'static [u8], io::Error>(io::Error::new(
+                    Err::<[u8; 3], io::Error>(io::Error::new(
                         io::ErrorKind::Other,
                         "handler failed",
                     ))
@@ -236,8 +246,8 @@ mod tests {
                 .ok();
         });
 
-        let response = send_recv(addr, &[1u8], 5);
-        assert_eq!(response, b"Error");
+        let response = send_recv(addr, &[1u8], 3);
+        assert_eq!(response, ERR);
     }
 
     #[test]
@@ -251,7 +261,7 @@ mod tests {
             server
                 .start(move |_addr, _msg: Msg| {
                     tx.send(()).ok();
-                    Ok::<&'static [u8], io::Error>(b".")
+                    Ok::<[u8; 1], io::Error>(DOT)
                 })
                 .ok();
         });
@@ -275,7 +285,7 @@ mod tests {
 
         thread::spawn(move || {
             server
-                .start(|_addr, _msg: Msg| Ok::<&'static [u8], io::Error>(b"."))
+                .start(|_addr, _msg: Msg| Ok::<[u8; 1], io::Error>(DOT))
                 .ok();
         });
 
@@ -306,7 +316,7 @@ mod tests {
             server
                 .start(move |_addr, msg: Msg| {
                     tx.send(msg).ok();
-                    Ok::<&'static [u8], io::Error>(b".")
+                    Ok::<[u8; 1], io::Error>(DOT)
                 })
                 .ok();
         });
@@ -331,7 +341,7 @@ mod tests {
             server
                 .start(move |peer, _msg: Msg| {
                     tx.send(peer).ok();
-                    Ok::<&'static [u8], io::Error>(b".")
+                    Ok::<[u8; 1], io::Error>(DOT)
                 })
                 .ok();
         });
@@ -359,7 +369,7 @@ mod tests {
 
         let th = thread::spawn(move || {
             server
-                .start(|_addr, _msg: Msg| Ok::<&'static [u8], io::Error>(b"."))
+                .start(|_addr, _msg: Msg| Ok::<[u8; 1], io::Error>(DOT))
                 .ok();
         });
 
@@ -387,7 +397,7 @@ mod tests {
 
         let th = thread::spawn(move || {
             server
-                .start(|_addr, _msg: Msg| Ok::<&'static [u8], io::Error>(b"."))
+                .start(|_addr, _msg: Msg| Ok::<[u8; 1], io::Error>(DOT))
                 .ok();
         });
 
@@ -415,7 +425,7 @@ mod tests {
 
         let th = thread::spawn(move || {
             server
-                .start(|_addr, _msg: Msg| Ok::<&'static [u8], io::Error>(b"."))
+                .start(|_addr, _msg: Msg| Ok::<[u8; 1], io::Error>(DOT))
                 .ok();
         });
 

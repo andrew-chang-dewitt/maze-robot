@@ -74,7 +74,14 @@ impl MultiMaze for MultiTextMaze {
         // bot positions are runtime state not encoded in chars — check occupied set before chars
         // no self-exclusion needed: peek target is always a different cell than current loc
         if self.occupied.contains(&pos) {
-            return Ok(Cell::Occupied);
+            let occupier = self
+                .locs
+                .iter()
+                .position(|p| p == &pos)
+                .expect("position will always be in locs since it is in occupied");
+            return Ok(Cell::Occupied(
+                occupier.try_into().expect("value to work as u32"),
+            ));
         }
         Ok(self
             .chars
@@ -321,7 +328,7 @@ mod tests {
         // "SS": bot 0 at idx 0, bot 1 at idx 1
         let maze = make_maze("SS", 2);
         let cell = maze.look_dir(0, Direction::East).expect("look_dir ok");
-        assert_eq!(cell, Cell::Occupied);
+        assert_eq!(cell, Cell::Occupied(1));
     }
 
     #[test]

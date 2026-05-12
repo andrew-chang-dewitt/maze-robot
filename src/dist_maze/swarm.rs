@@ -41,21 +41,23 @@ impl Swarm {
     /// Non-blocking receive. Returns `Ok(None)` when no datagram is currently ready (requires
     /// the underlying socket to be in non-blocking mode). Drops datagrams whose 8-byte nonce
     /// prefix matches this instance's.
-    pub fn try_recv_raw(&self) -> io::Result<Option<Vec<u8>>> {
+    pub fn try_recv_raw<const N: usize>(&self) -> io::Result<Option<[u8; N]>> {
         // Max UDP payload (65,507 = 65,535 - 20 IP hdr - 8 UDP hdr).
         let mut buf = [0u8; 65507];
         loop {
             match self.socket.recv_from(&mut buf) {
                 Ok((n, _)) => {
-                    if n < 8 {
-                        // datagram too short to contain a nonce; drop and try the next one
+                    if n != 8 + N {
+                        // datagram must be nonce (8 bytes) + payload (N bytes)
                         continue;
                     }
                     if buf[..8] == self.nonce {
                         // self-broadcast looped back; drop and try the next one
                         continue;
                     }
-                    return Ok(Some(buf[8..n].to_vec()));
+                    return Ok(Some(
+                        buf[8..n].try_into().expect("length already validated"),
+                    ));
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(None),
                 Err(e) => return Err(e),

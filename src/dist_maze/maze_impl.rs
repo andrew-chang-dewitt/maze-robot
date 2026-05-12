@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    Cell, Direction,
+    Cell, Direction, NULL_B,
     dist_maze::TcpServer,
     traits::{Maze, MazeError, MazeErrorType, MultiMaze},
 };
@@ -25,27 +25,26 @@ impl Maze for DistMazeClient {
         let op: [u8; 1] = ServerOp::Look(direction).into();
         (&self.socket).write_all(&op).map_err(io_to_maze_err)?;
 
-        let mut resp = [0u8; 1];
+        let mut resp = [0u8; 5];
         (&self.socket)
             .read_exact(&mut resp)
             .map_err(io_to_maze_err)?;
 
-        match resp[0] {
-            0x00 => Ok(Cell::Finish),
-            0x01 => Ok(Cell::Occupied),
-            0x02 => Ok(Cell::Open),
-            0x03 => Ok(Cell::Wall),
-            b => Err(MazeError::new(MazeErrorType::CreationError(format!(
-                "unexpected look_dir response byte: {b:#04x}"
-            )))),
-        }
+        let cell: Cell = resp.try_into().map_err(|e| {
+            MazeError::new(MazeErrorType::TransportError(format!(
+                "Unable to parse Cell from bytes {resp:?}:\n  {e}"
+            )))
+            .caused_by(e)
+        })?;
+
+        Ok(cell)
     }
 
     fn move_dir(&mut self, direction: Direction) -> Result<(), MazeError> {
         let op: [u8; 1] = ServerOp::Move(direction).into();
         self.socket.write_all(&op).map_err(io_to_maze_err)?;
 
-        let mut resp = [0u8; 1];
+        let mut resp = [0u8; 5];
         self.socket.read_exact(&mut resp).map_err(io_to_maze_err)?;
 
         match resp[0] {
@@ -147,7 +146,7 @@ impl<M: MultiMaze + Send + Sync + 'static> DistMazeServer<M> {
 
         server
             .start(
-                move |addr: SocketAddr, msg: ServerOpMsg| -> Result<&'static [u8], io::Error> {
+                move |addr: SocketAddr, msg: ServerOpMsg| -> Result<[u8; 5], io::Error> {
                     let mut s = state.write().expect("state lock poisoned");
 
                     let bot_id = match s.bots.get(&addr).copied() {
@@ -163,23 +162,20 @@ impl<M: MultiMaze + Send + Sync + 'static> DistMazeServer<M> {
                     };
 
                     match msg.0 {
+                        // Look responds w/ Cell value for requested direction
                         ServerOp::Look(dir) => {
                             let cell = s
                                 .maze
                                 .look_dir(bot_id, dir)
                                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-                            Ok(match cell {
-                                Cell::Finish => b"\x00",
-                                Cell::Occupied => b"\x01",
-                                Cell::Open => b"\x02",
-                                Cell::Wall => b"\x03",
-                            })
+                            Ok(cell.into())
                         }
+                        // Move responds w/ OK sentinal, or error
                         ServerOp::Move(dir) => {
                             s.maze
                                 .move_dir(bot_id, dir)
                                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-                            Ok(b"\xff")
+                            Ok([0xff, NULL_B, NULL_B, NULL_B, NULL_B])
                         }
                     }
                 },
@@ -473,10 +469,10 @@ mod tests {
     }
 
     #[rstest]
-    #[case(b"\x00", Cell::Finish)]
-    #[case(b"\x01", Cell::Occupied)]
-    #[case(b"\x02", Cell::Open)]
-    #[case(b"\x03", Cell::Wall)]
+    #[case(b"\x00\x00\x00\x00\x00", Cell::Finish)]
+    #[case(b"\x01\x01\x00\x00\x00", Cell::Occupied(1u32))]
+    #[case(b"\x02\x00\x00\x00\x00", Cell::Open)]
+    #[case(b"\x03\x00\x00\x00\x00", Cell::Wall)]
     fn look_dir_decodes_cell_response(#[case] response: &'static [u8], #[case] expected: Cell) {
         // server returns a cell byte; client must decode it to the matching Cell variant
         let addr = mock_server(response);
@@ -487,7 +483,7 @@ mod tests {
     #[test]
     fn look_dir_returns_err_on_unknown_response_byte() {
         // 0xFF is the move-success sentinel, not a valid cell byte; client must return Err
-        let addr = mock_server(b"\xff");
+        let addr = mock_server(b"\xff\x00\x00\x00\x00");
         let client = DistMazeClient::try_from(addr).unwrap();
         assert!(client.look_dir(Direction::North).is_err());
     }
@@ -495,7 +491,7 @@ mod tests {
     #[test]
     fn move_dir_returns_ok_on_success_byte() {
         // 0xFF is the server's success sentinel for move_dir
-        let addr = mock_server(b"\xff");
+        let addr = mock_server(b"\xff\x00\x00\x00\x00");
         let mut client = DistMazeClient::try_from(addr).unwrap();
         assert!(client.move_dir(Direction::North).is_ok());
     }
@@ -503,7 +499,7 @@ mod tests {
     #[test]
     fn move_dir_returns_err_on_error_response() {
         // any byte other than 0xFF signals failure; 'E' (0x45) is the first byte of "Error"
-        let addr = mock_server(b"E");
+        let addr = mock_server(b"E\x00\x00\x00\x00");
         let mut client = DistMazeClient::try_from(addr).unwrap();
         assert!(client.move_dir(Direction::North).is_err());
     }
@@ -519,10 +515,10 @@ mod tests {
     // --- DistMazeServer::start tests ---
 
     #[rstest]
-    #[case(Cell::Finish, &[0x00u8])]
-    #[case(Cell::Occupied, &[0x01u8])]
-    #[case(Cell::Open, &[0x02u8])]
-    #[case(Cell::Wall, &[0x03u8])]
+    #[case(Cell::Finish, &[0x00u8, 0, 0, 0, 0])]
+    #[case(Cell::Occupied(1), &[0x01u8, 1, 0, 0, 0])]
+    #[case(Cell::Open, &[0x02u8, 0, 0, 0, 0])]
+    #[case(Cell::Wall, &[0x03u8, 0, 0, 0, 0])]
     fn start_look_encodes_cell_variant(#[case] cell: Cell, #[case] expected: &[u8]) {
         let maze = MockMaze::new(cell, true, true, true);
         let (server, server_addr) = make_server(maze);
@@ -535,7 +531,7 @@ mod tests {
     fn start_move_success_returns_success_byte() {
         let (server, server_addr) = make_server(ok_maze());
         let _shutdown = server.start().expect("server starts");
-        assert_eq!(send_op_fresh(server_addr, MOVE_NORTH), b"\xff");
+        assert_eq!(send_op_fresh(server_addr, MOVE_NORTH), b"\xff\x00\x00\x00\x00");
     }
 
     #[test]
@@ -544,7 +540,7 @@ mod tests {
         let (server, server_addr) = make_server(ok_maze());
         let _shutdown = server.start().expect("server starts");
         let result = send_op_fresh(server_addr, LOOK_NORTH);
-        assert_eq!(result, &[0x02u8]); // Cell::Open
+        assert_eq!(result, &[0x02u8, 0, 0, 0, 0]); // Cell::Open
     }
 
     #[test]
@@ -557,7 +553,7 @@ mod tests {
 
         let mut stream = TcpStream::connect(server_addr).unwrap();
         stream.write_all(&[LOOK_NORTH]).unwrap();
-        let mut resp = [0u8; 1];
+        let mut resp = [0u8; 5];
         stream.read_exact(&mut resp).unwrap();
         stream.write_all(&[LOOK_NORTH]).unwrap();
         stream.read_exact(&mut resp).unwrap();
@@ -572,7 +568,7 @@ mod tests {
         let maze = MockMaze::new(Cell::Open, true, true, false);
         let (server, server_addr) = make_server(maze);
         let _shutdown = server.start().expect("server starts");
-        assert_eq!(send_op_fresh(server_addr, LOOK_NORTH), b"Error");
+        assert_eq!(send_op_fresh(server_addr, LOOK_NORTH), b"ERR");
     }
 
     #[test]
@@ -590,7 +586,7 @@ mod tests {
         let _shutdown = server.start().expect("server starts");
 
         // first connection: add_bot fails → Error
-        assert_eq!(send_op_fresh(server_addr, LOOK_NORTH), b"Error");
+        assert_eq!(send_op_fresh(server_addr, LOOK_NORTH), b"ERR");
         // server still alive: confirm add_bot was attempted
         assert_eq!(*add_count.lock().unwrap(), 1);
     }
@@ -602,7 +598,7 @@ mod tests {
         let (server, server_addr) = make_server(maze);
         let (client, _) = bind_client();
         let _shutdown = server.start().expect("server starts");
-        assert_eq!(send_op(client, server_addr, MOVE_NORTH), b"Error");
+        assert_eq!(send_op(client, server_addr, MOVE_NORTH), b"ERR");
     }
 
     #[rstest]

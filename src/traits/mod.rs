@@ -73,9 +73,14 @@ impl Error for RobotError {
 
 #[derive(Debug)]
 pub enum MazeErrorType {
+    /// Errors that occur while creating a maze or maze client
     CreationError(String),
+    /// Encountered error while trying to move the robot
     MoveError(Direction, String),
+    /// An unknown robot identifier was encountered
     UnknownRobot(usize),
+    /// Transport-level I/O failure during send or recv.
+    TransportError(String),
 }
 
 #[derive(Debug)]
@@ -111,6 +116,7 @@ impl Display for MazeError {
             MazeErrorType::UnknownRobot(id) => {
                 format!("UnknownRobot: Robot w/ id {id} not known")
             }
+            MazeErrorType::TransportError(msg) => format!("TransportError: {msg}"),
         };
 
         write!(f, "MazeError:{out}")
