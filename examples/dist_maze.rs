@@ -16,13 +16,16 @@ use maze_robot::{dist_maze::DistMazeServer, text_maze::MultiTextMaze};
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct App {
+    /// Source file for maze to serve.
     maze_file: String,
+    /// TCP port to listen on.
+    port: u16,
 }
 
 fn main() -> anyhow::Result<()> {
-    let app = App::parse();
-    let maze = read_to_string(app.maze_file)?;
-    let server = make_server(maze, "0.0.0.0:0")?;
+    let App { maze_file, port } = App::parse();
+    let maze = read_to_string(maze_file)?;
+    let server = make_server(maze, format!("0.0.0.0:{port}").as_str())?;
 
     // start() spawns the worker thread and returns a one-shot shutdown closure.
     let shutdown = server.start()?;
@@ -30,8 +33,9 @@ fn main() -> anyhow::Result<()> {
     // Wire shutdown into Ctrl-C. The closure is FnOnce, so park it in Mutex<Option<_>> and
     // take() on the first signal. Use a channel to deliver the shutdown's result back to main.
     let (result_tx, result_rx) = std::sync::mpsc::channel();
-    let slot: Arc<Mutex<Option<Box<dyn FnOnce() -> Result<(), maze_robot::traits::MazeError> + Send>>>> =
-        Arc::new(Mutex::new(Some(Box::new(shutdown))));
+    let slot: Arc<
+        Mutex<Option<Box<dyn FnOnce() -> Result<(), maze_robot::traits::MazeError> + Send>>>,
+    > = Arc::new(Mutex::new(Some(Box::new(shutdown))));
     let slot_for_handler = Arc::clone(&slot);
     ctrlc::set_handler(move || {
         if let Some(stop) = slot_for_handler.lock().unwrap().take() {
@@ -50,7 +54,9 @@ fn main() -> anyhow::Result<()> {
 
 fn make_server(text: String, addr: &str) -> anyhow::Result<DistMazeServer<MultiTextMaze>> {
     let maze = MultiTextMaze::try_from(text)?;
-    let socket = addr.parse::<SocketAddr>().map_err(|e| anyhow!("invalid address {addr}: {e}"))?;
+    let socket = addr
+        .parse::<SocketAddr>()
+        .map_err(|e| anyhow!("invalid address {addr}: {e}"))?;
     let server = DistMazeServer::try_from((maze, socket))?;
     Ok(server)
 }

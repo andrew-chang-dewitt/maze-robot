@@ -35,14 +35,12 @@ use maze_robot::{Cell, CellDecodeError, DIR_ARR, Direction, dist_maze::DistRobot
 #[command(version, about, long_about = None)]
 struct App {
     /// Address of the DistMazeServer to connect to (e.g. 127.0.0.1:5000).
-    #[arg(long)]
     maze: SocketAddr,
     /// UDP port for the swarm broadcast. All peers must use the same port.
-    #[arg(long)]
     port: u16,
     /// Use loopback-subnet broadcast (127.255.255.255) for same-host testing instead of the
     /// wire-facing limited broadcast.
-    #[arg(long)]
+    #[arg(short, long, default_value_t = false)]
     local: bool,
 }
 
