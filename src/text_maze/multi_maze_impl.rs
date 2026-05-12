@@ -99,13 +99,26 @@ impl MultiMaze for MultiTextMaze {
 
         // only vacate old cell if no other bot remains there (shared-start case)
         let old_loc = self.locs[id];
-        if self.locs.iter().enumerate().all(|(i, &l)| i == id || l != old_loc) {
+        if self
+            .locs
+            .iter()
+            .enumerate()
+            .all(|(i, &l)| i == id || l != old_loc)
+        {
             self.occupied.remove(&old_loc);
         }
         self.occupied.insert(new_loc);
         self.locs[id] = new_loc;
 
         Ok(())
+    }
+}
+
+impl TryFrom<(String, usize)> for MultiTextMaze {
+    type Error = MazeError;
+
+    fn try_from((value, n_bots): (String, usize)) -> Result<Self, Self::Error> {
+        MultiTextMaze::try_from((value.as_str(), n_bots))
     }
 }
 
@@ -219,10 +232,7 @@ mod tests {
     #[case::right(("S \n  ", Direction::East, "S0\n  "), 1)]
     #[case::down((" S\n  ", Direction::South, " S\n 0"), 1)]
     #[case::left(("  \n S", Direction::West, "  \n0S"), 1)]
-    fn test_move_open(
-        #[case] (state, direction, exp): (&str, Direction, &str),
-        #[case] _n: usize,
-    ) {
+    fn test_move_open(#[case] (state, direction, exp): (&str, Direction, &str), #[case] _n: usize) {
         let mut maze = make_maze(state, 1);
         maze.move_dir(0, direction)
             .expect("state to update successfully");

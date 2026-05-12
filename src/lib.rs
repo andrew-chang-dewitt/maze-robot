@@ -10,6 +10,7 @@ use traits::{MazeError, Robot};
 pub fn new_bot<R: Robot, M: TryInto<R, Error = MazeError>>(maze: M) -> Result<R, MazeError> {
     maze.try_into()
 }
+
 pub const DIR_ARR: [Direction; 4] = [
     Direction::North,
     Direction::East,
